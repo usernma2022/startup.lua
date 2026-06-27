@@ -1,65 +1,32 @@
---========================================================--
--- CBC MANUAL CONTROL + MATH DEBUG
---========================================================--
-
 local CHANNEL = 1
-local YAW_OFFSET = 90
-
-local cannon = peripheral.find("cbc_cannon_mount")
-assert(cannon,"No cannon")
 
 local modem = peripheral.find("modem")
-assert(modem,"No modem")
+local cannon = peripheral.find("cbc_cannon_mount")
+
+assert(modem)
+assert(cannon)
 
 modem.open(CHANNEL)
 
-local target=nil
+local target
 
-local YAW_DIR="bottom"
-local YAW_BRAKE="left"
+local PITCH_DIR = "top"
 
-local PITCH_DIR="top"
-local PITCH_BRAKE="right"
+local lastDir = nil
 
-local yawDir=false
-local pitchDir=false
-local yawBrake=0
-local pitchBrake=0
+local function calcPitch()
 
-local function norm(a)
-    a=a%360
-    if a<0 then a=a+360 end
-    return a
-end
+    if not target then
+        return nil
+    end
 
-local function angleError(a,b)
-    local e=(a-b)%360
-    if e>180 then e=e-360 end
-    return e
-end
+    local dx = target.x - cannon.getX()
+    local dy = target.y - cannon.getY()
+    local dz = target.z - cannon.getZ()
 
-local function calcAngles(t)
+    local horiz = math.sqrt(dx*dx + dz*dz)
 
-    local cx,cy,cz=cannon.getX(),cannon.getY(),cannon.getZ()
-
-    local dx=t.x-cx
-    local dy=t.y-cy
-    local dz=t.z-cz
-
-    local yaw=math.deg(math.atan2(dz,dx))+YAW_OFFSET
-    local horiz=math.sqrt(dx*dx+dz*dz)
-    local pitch=math.deg(math.atan2(dy,horiz))
-
-    return yaw,pitch
-end
-
-local function apply()
-
-    redstone.setOutput(YAW_DIR,yawDir)
-    redstone.setOutput(PITCH_DIR,pitchDir)
-
-    redstone.setAnalogOutput(YAW_BRAKE,yawBrake)
-    redstone.setAnalogOutput(PITCH_BRAKE,pitchBrake)
+    return math.deg(math.atan2(dy, horiz))
 
 end
 
@@ -69,10 +36,10 @@ function()
 
     while true do
 
-        local _,_,ch,_,msg=os.pullEvent("modem_message")
+        local _,_,ch,_,msg = os.pullEvent("modem_message")
 
-        if ch==CHANNEL and type(msg)=="table" and msg.type=="PLANE" then
-            target=msg
+        if ch == CHANNEL and type(msg) == "table" and msg.type == "PLANE" then
+            target = msg
         end
 
     end
@@ -86,26 +53,30 @@ function()
         term.clear()
         term.setCursorPos(1,1)
 
-        print("=== CBC DEBUG ===")
-        print()
-
-        local actualYaw=norm(cannon.getYaw())
-        local actualPitch=cannon.getPitch()
-
-        print(("Actual Yaw   : %.2f"):format(actualYaw))
-        print(("Actual Pitch : %.2f"):format(actualPitch))
-        print()
-
         if target then
 
-            local desiredYaw,desiredPitch=calcAngles(target)
+            local desired = calcPitch()
+            local actual = cannon.getPitch()
 
-            print(("Desired Yaw   : %.2f"):format(desiredYaw))
-            print(("Desired Pitch : %.2f"):format(desiredPitch))
+            local err = desired - actual
+
+            local dir = err > 0
+
+            -- ONLY send a redstone update if the direction changed
+            if dir ~= lastDir then
+                redstone.setOutput(PITCH_DIR, dir)
+                lastDir = dir
+            end
+
+            print(("Desired: %.2f"):format(desired))
+            print(("Actual : %.2f"):format(actual))
+            print(("Error  : %.2f"):format(err))
             print()
-
-            print(("Yaw Error   : %.2f"):format(angleError(desiredYaw,actualYaw)))
-            print(("Pitch Error : %.2f"):format(desiredPitch-actualPitch))
+            print("Direction:")
+            print(dir and "UP" or "DOWN")
+            print()
+            print("Updates sent:")
+            print(lastDir == dir and "No new update" or "Changed")
 
         else
 
@@ -113,54 +84,9 @@ function()
 
         end
 
-        print()
-        print("Outputs")
-        print("Yaw Dir    : "..(yawDir and "RIGHT" or "LEFT"))
-        print("Pitch Dir  : "..(pitchDir and "UP" or "DOWN"))
-        print("Yaw Brake  : "..yawBrake)
-        print("PitchBrake : "..pitchBrake)
-
-        print()
-        print("W/S = Pitch")
-        print("A/D = Yaw")
-        print("SPACE = Release")
-        print("B = Brake")
-        print("Q = Quit")
-
-        local _,key=os.pullEvent("key")
-
-        if key==keys.w then
-            pitchDir=true
-            pitchBrake=0
-
-        elseif key==keys.s then
-            pitchDir=false
-            pitchBrake=0
-
-        elseif key==keys.a then
-            yawDir=false
-            yawBrake=0
-
-        elseif key==keys.d then
-            yawDir=true
-            yawBrake=0
-
-        elseif key==keys.space then
-            yawBrake=0
-            pitchBrake=0
-
-        elseif key==keys.b then
-            yawBrake=15
-            pitchBrake=15
-
-        elseif key==keys.q then
-            redstone.setAnalogOutput(YAW_BRAKE,0)
-            redstone.setAnalogOutput(PITCH_BRAKE,0)
-            break
-        end
-
-        apply()
+        sleep(0.05)
 
     end
 
-end)
+end
+)
