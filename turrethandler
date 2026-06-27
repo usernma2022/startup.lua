@@ -1,5 +1,5 @@
 --========================================================--
--- CBC AWACS TURRET CONTROLLER v5 (REBUILD STABLE)
+-- CBC AWACS TURRET CONTROLLER v5.1 (CLEAN STABLE)
 --========================================================--
 
 -------------------------
@@ -15,19 +15,16 @@ local COAST_ZONE = 8
 local YAW_OFFSET = 90
 local FIRE_DELAY = 0.5
 
--- tuning (IMPORTANT)
-local MOVE_GAIN = 1.2
-local COAST_BRAKE = 3
-local HOLD_BRAKE = 10
+local PITCH_INVERT = false
 
 -------------------------
 -- PERIPHERALS
 -------------------------
 local modem = peripheral.find("modem")
-assert(modem, "No modem")
+assert(modem, "No modem found")
 
 local cannon = peripheral.find("cbc_cannon_mount")
-assert(cannon, "No CBC Cannon Mount")
+assert(cannon, "No CBC Cannon Mount found")
 
 modem.open(CHANNEL)
 
@@ -42,10 +39,6 @@ local desiredPitch = 0
 
 local lastFire = 0
 
--- anti-lock safety
-local yawState = "HOLD"
-local pitchState = "HOLD"
-
 -------------------------
 -- REDSTONE MAP
 -------------------------
@@ -58,6 +51,10 @@ local PITCH_BRAKE = "right"
 -------------------------
 -- HELPERS
 -------------------------
+local function clamp(x, a, b)
+    return math.max(a, math.min(b, x))
+end
+
 local function norm(a)
     a = a % 360
     if a < 0 then a = a + 360 end
@@ -70,12 +67,8 @@ local function angleError(a, b)
     return e
 end
 
-local function clamp(x, a, b)
-    return math.max(a, math.min(b, x))
-end
-
 -------------------------
--- ANGLES
+-- TARGET MATH
 -------------------------
 local function calcAngles(t)
     local cx, cy, cz = cannon.getX(), cannon.getY(), cannon.getZ()
@@ -92,23 +85,60 @@ local function calcAngles(t)
 end
 
 -------------------------
--- TARGET
+-- TARGET RECEIVER
 -------------------------
-local function hasTarget()
-    return target and (os.clock() - lastPacket) < TARGET_TIMEOUT
-end
-
 local function receiver()
     while true do
         local _, _, ch, _, msg = os.pullEvent("modem_message")
 
         if ch == CHANNEL and type(msg) == "table" and msg.type == "PLANE" then
-            target = { x = msg.x, y = msg.y, z = msg.z }
+            target = {
+                x = msg.x,
+                y = msg.y,
+                z = msg.z
+            }
             lastPacket = os.clock()
         end
     end
 end
 
+-------------------------
+-- VALID TARGET
+-------------------------
+local function hasTarget()
+    return target and (os.clock() - lastPacket) < TARGET_TIMEOUT
+end
+
+-------------------------
+-- AIM UPDATE
+-------------------------
+local function updateAim()
+    if not hasTarget() then return end
+    desiredYaw, desiredPitch = calcAngles(target)
+end
+
+-------------------------
+-- YAW CONTROL (YOU SAID THIS WORKS)
+-------------------------
+local function controlYaw(err)
+    local absErr = math.abs(err)
+
+    redstone.setOutput(YAW_DIR, err > 0)
+
+    if absErr <= DEAD_ZONE then
+        redstone.setAnalogOutput(YAW_BRAKE, 12)
+        return true
+    end
+
+    local brake = math.min(absErr * 0.9, 15)
+    redstone.setAnalogOutput(YAW_BRAKE, brake)
+
+    return false
+end
+
+-------------------------
+-- PITCH CONTROL (FIXED CORE PROBLEM)
+-------------------------
 local function controlPitch(err)
 
     if PITCH_INVERT then
@@ -117,23 +147,23 @@ local function controlPitch(err)
 
     local absErr = math.abs(err)
 
-    -- direction output (ONLY sign, no logic ambiguity)
-    local dir = err > 0
+    redstone.setOutput(PITCH_DIR, err > 0)
 
-    redstone.setOutput(PITCH_DIR, dir)
+    -- HARD FIX: release brake before motion
+    if absErr > DEAD_ZONE then
+        redstone.setAnalogOutput(PITCH_BRAKE, 0)
+    end
 
-    -- IMPORTANT: prevent 90° lock
-    if absErr < DEAD_ZONE then
+    -- COAST zone prevents 90° lock
+    if absErr <= COAST_ZONE then
+        redstone.setAnalogOutput(PITCH_BRAKE, 4)
+    end
+
+    -- FULL STOP
+    if absErr <= DEAD_ZONE then
         redstone.setAnalogOutput(PITCH_BRAKE, 12)
         return true
     end
-
-    -- release brake BEFORE movement (fixes “stuck at 90” bug)
-    redstone.setAnalogOutput(PITCH_BRAKE, 0)
-
-    -- proportional braking
-    local brake = math.min(absErr * 0.8, 15)
-    redstone.setAnalogOutput(PITCH_BRAKE, brake)
 
     return false
 end
@@ -142,7 +172,7 @@ end
 -- FIRE
 -------------------------
 local function fire(yawOK, pitchOK)
-    if yawOK == "HOLD" and pitchOK == "HOLD" then
+    if yawOK and pitchOK then
         if os.clock() - lastFire > FIRE_DELAY then
             cannon.fire()
             lastFire = os.clock()
@@ -159,25 +189,24 @@ local function control()
 
         if hasTarget() then
 
+            updateAim()
+
             local yaw = norm(cannon.getYaw())
             local pitch = cannon.getPitch()
-
-            desiredYaw, desiredPitch = calcAngles(target)
 
             local yawErr = angleError(desiredYaw, yaw)
             local pitchErr = desiredPitch - pitch
 
-            -- IMPORTANT: independent axis control
-            yawState = axisControl(yawErr, YAW_DIR, YAW_BRAKE, yawState)
-            pitchState = axisControl(pitchErr, PITCH_DIR, PITCH_BRAKE, pitchState)
+            local yawOK = controlYaw(yawErr)
+            local pitchOK = controlPitch(pitchErr)
 
-            fire(yawState, pitchState)
+            fire(yawOK, pitchOK)
 
         else
             redstone.setOutput(YAW_DIR, false)
             redstone.setOutput(PITCH_DIR, false)
-            redstone.setAnalogOutput(YAW_BRAKE, HOLD_BRAKE)
-            redstone.setAnalogOutput(PITCH_BRAKE, HOLD_BRAKE)
+            redstone.setAnalogOutput(YAW_BRAKE, 15)
+            redstone.setAnalogOutput(PITCH_BRAKE, 15)
         end
 
         sleep(UPDATE_RATE)
