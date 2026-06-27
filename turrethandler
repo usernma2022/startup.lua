@@ -1,5 +1,6 @@
 --========================================================--
--- CBC AWACS TURRET CONTROLLER v5.1
+-- CBC AWACS TURRET CONTROLLER v5.2 (AUTHORITY FIX)
+-- Fixes: 90° snap-back, near-target loss of control
 --========================================================--
 
 -------------------------
@@ -11,18 +12,18 @@ local TARGET_TIMEOUT = 5
 
 local YAW_OFFSET = 90
 
--- PID tuning
-local KP = 1.4
-local KI = 0.02
-local KD = 0.6
+-- PID tuning (safe baseline)
+local KP = 1.3
+local KI = 0.015
+local KD = 0.55
 
 local INTEGRAL_LIMIT = 50
 local OUTPUT_LIMIT = 15
 
 local DEAD_ZONE = 1.2
 
--- 🔧 IMPORTANT FIX: your discovered neutral offset (~ -45°)
-local PITCH_OFFSET = 45
+-- 🔥 CRITICAL FIX: prevents loss of control near target
+local MIN_HOLD_POWER = 4
 
 -------------------------
 -- PERIPHERALS
@@ -30,8 +31,8 @@ local PITCH_OFFSET = 45
 local modem = peripheral.find("modem")
 local cannon = peripheral.find("cbc_cannon_mount")
 
-assert(modem, "No modem")
-assert(cannon, "No cannon")
+assert(modem, "No modem found")
+assert(cannon, "No cannon found")
 
 modem.open(CHANNEL)
 
@@ -85,7 +86,7 @@ local function calcAngles(t)
 end
 
 -------------------------
--- TARGET INPUT
+-- INPUT
 -------------------------
 local function receiver()
     while true do
@@ -133,7 +134,7 @@ local function setAxis(dirSide, brakeSide, dir, power, lastDir, lastBrake)
 end
 
 -------------------------
--- CONTROL
+-- CONTROL LOOP
 -------------------------
 local function control()
 
@@ -148,48 +149,54 @@ local function control()
             local desiredYaw, desiredPitch = calcAngles(target)
 
             local yaw = norm(cannon.getYaw())
-
-            -- 🔧 FIX: calibrated pitch space
-            local rawPitch = cannon.getPitch()
-            local pitch = rawPitch + PITCH_OFFSET
+            local pitch = cannon.getPitch()
 
             local yawErr = angleError(desiredYaw, yaw)
             local pitchErr = desiredPitch - pitch
 
+            -- PID outputs
             local yawOut
             yawOut, yawI, yawPrev = pid(yawErr, dt, yawI, yawPrev)
 
             local pitchOut
             pitchOut, pitchI, pitchPrev = pid(pitchErr, dt, pitchI, pitchPrev)
 
+            -- direction
             local yawDir = yawOut > 0
             local pitchDir = pitchOut > 0
 
             local yawPower = math.abs(yawOut)
             local pitchPower = math.abs(pitchOut)
 
-            if math.abs(yawErr) < DEAD_ZONE then yawPower = 10 end
-            if math.abs(pitchErr) < DEAD_ZONE then pitchPower = 10 end
+            -- 🔥 CRITICAL FIX: NEVER DROP CONTROL AUTHORITY
+            yawPower = math.max(MIN_HOLD_POWER, yawPower)
+            pitchPower = math.max(MIN_HOLD_POWER, pitchPower)
 
+            -- deadzone still allows slight hold
+            if math.abs(yawErr) < DEAD_ZONE then yawPower = MIN_HOLD_POWER end
+            if math.abs(pitchErr) < DEAD_ZONE then pitchPower = MIN_HOLD_POWER end
+
+            -- apply
             lastYawDir, lastYawBrake =
                 setAxis("bottom", "left", yawDir, yawPower, lastYawDir, lastYawBrake)
 
             lastPitchDir, lastPitchBrake =
                 setAxis("top", "right", pitchDir, pitchPower, lastPitchDir, lastPitchBrake)
 
+            -- debug
             term.setCursorPos(1,1)
             term.clear()
 
-            print("CBC TURRET v5.1 (CALIBRATED)")
-            print("-----------------------------")
+            print("CBC TURRET v5.2 (AUTHORITY FIX)")
+            print("-------------------------------")
             print("Yaw Err  :", yawErr)
             print("Pitch Err:", pitchErr)
             print("")
-            print("Pitch Raw:", rawPitch)
-            print("Pitch Adj:", pitch)
-            print("")
             print("Yaw Out  :", yawOut)
             print("Pitch Out:", pitchOut)
+            print("")
+            print("Yaw Power  :", yawPower)
+            print("Pitch Power:", pitchPower)
 
         else
             redstone.setOutput("bottom", false)
