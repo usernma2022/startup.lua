@@ -137,14 +137,39 @@ end
 -------------------------
 -- PITCH CONTROL (FIXED STALL + LIMIT RECOVERY)
 -------------------------
-while true do
-    redstone.setOutput("top", true)
-    redstone.setAnalogOutput("right", 0)
-    sleep(1)
+local pitchTimer = 0
+local PITCH_PULSE = 0.12
 
-    redstone.setOutput("top", false)
-    redstone.setAnalogOutput("right", 0)
-    sleep(1)
+local function controlPitch(err, dt)
+
+    local absErr = math.abs(err)
+
+    -- HOLD ZONE
+    if absErr <= DEAD_ZONE then
+        redstone.setOutput(PITCH_DIR, false)
+        redstone.setAnalogOutput(PITCH_BRAKE, 15)
+        return true
+    end
+
+    -- direction
+    redstone.setOutput(PITCH_DIR, err > 0)
+
+    -- PULSE MOVEMENT (KEY FIX)
+    pitchTimer = pitchTimer + dt
+
+    if pitchTimer >= PITCH_PULSE then
+        pitchTimer = 0
+    end
+
+    if pitchTimer < PITCH_PULSE * 0.5 then
+        -- allow movement
+        redstone.setAnalogOutput(PITCH_BRAKE, 0)
+    else
+        -- brief damping window
+        redstone.setAnalogOutput(PITCH_BRAKE, 6)
+    end
+
+    return false
 end
 
 -------------------------
