@@ -1,6 +1,6 @@
 --========================================================--
--- CBC AWACS TURRET CONTROLLER v5.2 (AUTHORITY FIX)
--- Fixes: 90° snap-back, near-target loss of control
+-- CBC AWACS TURRET CONTROLLER v5.3 (HYBRID FIX)
+-- Yaw = PID | Pitch = Lift-Only Control
 --========================================================--
 
 -------------------------
@@ -12,18 +12,14 @@ local TARGET_TIMEOUT = 5
 
 local YAW_OFFSET = 90
 
--- PID tuning (safe baseline)
-local KP = 1.3
-local KI = 0.015
-local KD = 0.55
-
+-- YAW PID
+local KP, KI, KD = 1.3, 0.015, 0.55
 local INTEGRAL_LIMIT = 50
 local OUTPUT_LIMIT = 15
 
-local DEAD_ZONE = 1.2
-
--- 🔥 CRITICAL FIX: prevents loss of control near target
-local MIN_HOLD_POWER = 4
+-- PITCH (lift-only tuning)
+local PITCH_STEP_POWER = 15
+local PITCH_DEADZONE = 1.5
 
 -------------------------
 -- PERIPHERALS
@@ -41,16 +37,9 @@ modem.open(CHANNEL)
 -------------------------
 local target = nil
 local lastPacket = 0
-
 local lastTime = os.clock()
 
 local yawI, yawPrev = 0, 0
-local pitchI, pitchPrev = 0, 0
-
-local lastYawDir = nil
-local lastPitchDir = nil
-local lastYawBrake = -1
-local lastPitchBrake = -1
 
 -------------------------
 -- HELPERS
@@ -100,37 +89,37 @@ local function receiver()
 end
 
 -------------------------
--- PID
+-- YAW PID
 -------------------------
-local function pid(err, dt, i, prev)
+local function yawPID(err, dt)
 
-    i = i + err * dt
-    i = clamp(i, -INTEGRAL_LIMIT, INTEGRAL_LIMIT)
+    yawI = yawI + err * dt
+    yawI = clamp(yawI, -INTEGRAL_LIMIT, INTEGRAL_LIMIT)
 
-    local d = (err - prev) / dt
+    local d = (err - yawPrev) / dt
+    yawPrev = err
 
-    local out = KP * err + KI * i + KD * d
-    out = clamp(out, -OUTPUT_LIMIT, OUTPUT_LIMIT)
-
-    return out, i, err
+    local out = KP * err + KI * yawI + KD * d
+    return clamp(out, -OUTPUT_LIMIT, OUTPUT_LIMIT)
 end
 
 -------------------------
--- REDSTONE APPLY (stateful)
+-- PITCH LIFT CONTROL (CRITICAL FIX)
 -------------------------
-local function setAxis(dirSide, brakeSide, dir, power, lastDir, lastBrake)
+local function pitchControl(err)
 
-    if dir ~= lastDir then
-        redstone.setOutput(dirSide, dir)
-        lastDir = dir
+    -- ONLY UPWARD AUTHORITY EXISTS
+    if err > PITCH_DEADZONE then
+        redstone.setOutput("top", true)
+        redstone.setAnalogOutput("right", PITCH_STEP_POWER)
+        return false
     end
 
-    if power ~= lastBrake then
-        redstone.setAnalogOutput(brakeSide, power)
-        lastBrake = power
-    end
+    -- STOP APPLYING FORCE (do NOT try to go down)
+    redstone.setOutput("top", false)
+    redstone.setAnalogOutput("right", 0)
 
-    return lastDir, lastBrake
+    return math.abs(err) <= PITCH_DEADZONE
 end
 
 -------------------------
@@ -154,49 +143,35 @@ local function control()
             local yawErr = angleError(desiredYaw, yaw)
             local pitchErr = desiredPitch - pitch
 
-            -- PID outputs
-            local yawOut
-            yawOut, yawI, yawPrev = pid(yawErr, dt, yawI, yawPrev)
+            -- YAW (full PID)
+            local yawOut = yawPID(yawErr, dt)
 
-            local pitchOut
-            pitchOut, pitchI, pitchPrev = pid(pitchErr, dt, pitchI, pitchPrev)
-
-            -- direction
             local yawDir = yawOut > 0
-            local pitchDir = pitchOut > 0
+            local yawPower = math.max(3, math.abs(yawOut))
 
-            local yawPower = math.abs(yawOut)
-            local pitchPower = math.abs(pitchOut)
+            redstone.setOutput("bottom", yawDir)
+            redstone.setAnalogOutput("left", yawPower)
 
-            -- 🔥 CRITICAL FIX: NEVER DROP CONTROL AUTHORITY
-            yawPower = math.max(MIN_HOLD_POWER, yawPower)
-            pitchPower = math.max(MIN_HOLD_POWER, pitchPower)
+            -- PITCH (lift-only)
+            local pitchOK = pitchControl(pitchErr)
 
-            -- deadzone still allows slight hold
-            if math.abs(yawErr) < DEAD_ZONE then yawPower = MIN_HOLD_POWER end
-            if math.abs(pitchErr) < DEAD_ZONE then pitchPower = MIN_HOLD_POWER end
+            -- FIRE ONLY WHEN STABLE
+            if math.abs(yawErr) < 2 and pitchOK then
+                cannon.fire()
+            end
 
-            -- apply
-            lastYawDir, lastYawBrake =
-                setAxis("bottom", "left", yawDir, yawPower, lastYawDir, lastYawBrake)
-
-            lastPitchDir, lastPitchBrake =
-                setAxis("top", "right", pitchDir, pitchPower, lastPitchDir, lastPitchBrake)
-
-            -- debug
+            -- DEBUG
             term.setCursorPos(1,1)
             term.clear()
 
-            print("CBC TURRET v5.2 (AUTHORITY FIX)")
-            print("-------------------------------")
+            print("CBC TURRET v5.3 (HYBRID)")
+            print("------------------------")
             print("Yaw Err  :", yawErr)
             print("Pitch Err:", pitchErr)
             print("")
             print("Yaw Out  :", yawOut)
-            print("Pitch Out:", pitchOut)
-            print("")
-            print("Yaw Power  :", yawPower)
-            print("Pitch Power:", pitchPower)
+            print("Pitch Mode: LIFT ONLY")
+            print("Pitch OK :", pitchOK)
 
         else
             redstone.setOutput("bottom", false)
