@@ -1,107 +1,166 @@
---========================================--
--- CBC Pitch Math Debugger
---========================================--
+--========================================================--
+-- CBC MANUAL CONTROL + MATH DEBUG
+--========================================================--
 
 local CHANNEL = 1
 local YAW_OFFSET = 90
 
-local modem = peripheral.find("modem")
-assert(modem, "No modem")
-
 local cannon = peripheral.find("cbc_cannon_mount")
-assert(cannon, "No cannon")
+assert(cannon,"No cannon")
+
+local modem = peripheral.find("modem")
+assert(modem,"No modem")
 
 modem.open(CHANNEL)
 
-local target = nil
+local target=nil
+
+local YAW_DIR="bottom"
+local YAW_BRAKE="left"
+
+local PITCH_DIR="top"
+local PITCH_BRAKE="right"
+
+local yawDir=false
+local pitchDir=false
+local yawBrake=0
+local pitchBrake=0
+
+local function norm(a)
+    a=a%360
+    if a<0 then a=a+360 end
+    return a
+end
+
+local function angleError(a,b)
+    local e=(a-b)%360
+    if e>180 then e=e-360 end
+    return e
+end
 
 local function calcAngles(t)
 
-    local cx = cannon.getX()
-    local cy = cannon.getY()
-    local cz = cannon.getZ()
+    local cx,cy,cz=cannon.getX(),cannon.getY(),cannon.getZ()
 
-    local dx = t.x - cx
-    local dy = t.y - cy
-    local dz = t.z - cz
+    local dx=t.x-cx
+    local dy=t.y-cy
+    local dz=t.z-cz
 
-    local yaw = math.deg(math.atan2(dz, dx)) + YAW_OFFSET
-    local horizontal = math.sqrt(dx*dx + dz*dz)
-    local pitch = math.deg(math.atan2(dy, horizontal))
+    local yaw=math.deg(math.atan2(dz,dx))+YAW_OFFSET
+    local horiz=math.sqrt(dx*dx+dz*dz)
+    local pitch=math.deg(math.atan2(dy,horiz))
 
-    return yaw, pitch
+    return yaw,pitch
+end
+
+local function apply()
+
+    redstone.setOutput(YAW_DIR,yawDir)
+    redstone.setOutput(PITCH_DIR,pitchDir)
+
+    redstone.setAnalogOutput(YAW_BRAKE,yawBrake)
+    redstone.setAnalogOutput(PITCH_BRAKE,pitchBrake)
+
 end
 
 parallel.waitForAny(
 
-    function()
+function()
 
-        while true do
+    while true do
 
-            local _,_,ch,_,msg = os.pullEvent("modem_message")
+        local _,_,ch,_,msg=os.pullEvent("modem_message")
 
-            if ch == CHANNEL
-            and type(msg) == "table"
-            and msg.type == "PLANE" then
-
-                target = {
-                    x = msg.x,
-                    y = msg.y,
-                    z = msg.z
-                }
-
-            end
-
-        end
-
-    end,
-
-    function()
-
-        while true do
-
-            term.clear()
-            term.setCursorPos(1,1)
-
-            print("===== CBC PITCH DEBUG =====")
-            print()
-
-            print(string.format("Cannon X : %.2f", cannon.getX()))
-            print(string.format("Cannon Y : %.2f", cannon.getY()))
-            print(string.format("Cannon Z : %.2f", cannon.getZ()))
-            print()
-
-            print(string.format("Actual Yaw   : %.2f", cannon.getYaw()))
-            print(string.format("Actual Pitch : %.2f", cannon.getPitch()))
-            print()
-
-            if target then
-
-                local dyaw, dpitch = calcAngles(target)
-
-                local pitchErr = dpitch - cannon.getPitch()
-
-                print(string.format("Desired Yaw   : %.2f", dyaw))
-                print(string.format("Desired Pitch : %.2f", dpitch))
-                print()
-
-                print(string.format("Pitch Error : %.2f", pitchErr))
-                print()
-
-                print(string.format("Target X : %.2f", target.x))
-                print(string.format("Target Y : %.2f", target.y))
-                print(string.format("Target Z : %.2f", target.z))
-
-            else
-
-                print("Waiting for target...")
-
-            end
-
-            sleep(0.05)
-
+        if ch==CHANNEL and type(msg)=="table" and msg.type=="PLANE" then
+            target=msg
         end
 
     end
 
-)
+end,
+
+function()
+
+    while true do
+
+        term.clear()
+        term.setCursorPos(1,1)
+
+        print("=== CBC DEBUG ===")
+        print()
+
+        local actualYaw=norm(cannon.getYaw())
+        local actualPitch=cannon.getPitch()
+
+        print(("Actual Yaw   : %.2f"):format(actualYaw))
+        print(("Actual Pitch : %.2f"):format(actualPitch))
+        print()
+
+        if target then
+
+            local desiredYaw,desiredPitch=calcAngles(target)
+
+            print(("Desired Yaw   : %.2f"):format(desiredYaw))
+            print(("Desired Pitch : %.2f"):format(desiredPitch))
+            print()
+
+            print(("Yaw Error   : %.2f"):format(angleError(desiredYaw,actualYaw)))
+            print(("Pitch Error : %.2f"):format(desiredPitch-actualPitch))
+
+        else
+
+            print("Waiting for target...")
+
+        end
+
+        print()
+        print("Outputs")
+        print("Yaw Dir    : "..(yawDir and "RIGHT" or "LEFT"))
+        print("Pitch Dir  : "..(pitchDir and "UP" or "DOWN"))
+        print("Yaw Brake  : "..yawBrake)
+        print("PitchBrake : "..pitchBrake)
+
+        print()
+        print("W/S = Pitch")
+        print("A/D = Yaw")
+        print("SPACE = Release")
+        print("B = Brake")
+        print("Q = Quit")
+
+        local _,key=os.pullEvent("key")
+
+        if key==keys.w then
+            pitchDir=true
+            pitchBrake=0
+
+        elseif key==keys.s then
+            pitchDir=false
+            pitchBrake=0
+
+        elseif key==keys.a then
+            yawDir=false
+            yawBrake=0
+
+        elseif key==keys.d then
+            yawDir=true
+            yawBrake=0
+
+        elseif key==keys.space then
+            yawBrake=0
+            pitchBrake=0
+
+        elseif key==keys.b then
+            yawBrake=15
+            pitchBrake=15
+
+        elseif key==keys.q then
+            redstone.setAnalogOutput(YAW_BRAKE,0)
+            redstone.setAnalogOutput(PITCH_BRAKE,0)
+            break
+        end
+
+        apply()
+
+    end
+
+end)
