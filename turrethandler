@@ -97,21 +97,32 @@ local function control()
 
       local yawErr = angleError(dyaw, cyaw)
 
-      local deadzone = CONFIG.FINAL_DEADZONE or 1.0
+      -- normalize error into resistance strength
+      local absErr = math.min(math.abs(yawErr), 30)
 
-      if math.abs(yawErr) <= deadzone then
-        -- stop all yaw movement completely
-        redstone.setOutput(YAW_DIR, false)
-        redstone.setAnalogOutput(YAW_POWER, 0)
+      -- convert error into brake strength (THIS is the real control signal)
+      local brake = 0
+
+      if absErr < 1 then
+        brake = 15 -- lock exactly on target
+      elseif absErr < 3 then
+        brake = 12
+      elseif absErr < 8 then
+        brake = 9
+      elseif absErr < 15 then
+        brake = 6
+      elseif absErr < 25 then
+        brake = 3
       else
-        -- direction only
-        redstone.setOutput(YAW_DIR, yawErr > 0)
-
-        -- proportional power (this is the ONLY control signal)
-        local power = math.min(15, math.abs(yawErr) * 0.6)
-
-        redstone.setAnalogOutput(YAW_POWER, power)
+        brake = 0 -- allow free rotation when far off
       end
+
+      -- direction ONLY tells which way to relieve pressure
+      redstone.setOutput(YAW_DIR, yawErr > 0)
+
+      -- THIS is the actual positioning force
+      redstone.setAnalogOutput(YAW_BRAKE, brake)
+
       -- =========================
       -- PITCH (unchanged style)
       -- =========================
@@ -141,7 +152,7 @@ local function control()
       term.clear()
       print("CBC Turret v6.1 (yaw fixed properly)")
       print(("YawErr %.2f PitchErr %.2f"):format(yawErr, pitchErr))
-      print(("YawVel %.2f"):format(vel))
+      print(("YawVel %.2f"):format(vel or 0))
 
     else
       redstone.setOutput(YAW_DIR, false)
