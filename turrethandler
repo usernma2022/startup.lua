@@ -1,5 +1,5 @@
 --========================================================--
--- CBC TURRET MINIMAL DEBUG BUILD v1
+-- CBC AWACS TURRET CONTROLLER v5.0 (RESET-FIRST FIX)
 --========================================================--
 
 -------------------------
@@ -12,16 +12,17 @@ local TARGET_TIMEOUT = 5
 local DEAD_ZONE = 2
 local YAW_OFFSET = 90
 
+local FIRE_DELAY = 0.5
 local DEBUG = true
 
 -------------------------
 -- PERIPHERALS
 -------------------------
 local modem = peripheral.find("modem")
-assert(modem, "No modem")
+assert(modem, "No modem found")
 
 local cannon = peripheral.find("cbc_cannon_mount")
-assert(cannon, "No CBC Cannon Mount")
+assert(cannon, "No CBC Cannon Mount found")
 
 modem.open(CHANNEL)
 
@@ -34,8 +35,10 @@ local lastPacket = 0
 local desiredYaw = 0
 local desiredPitch = 0
 
+local lastFire = 0
+
 -------------------------
--- REDSTONE MAP (YOUR WIRING)
+-- REDSTONE MAP
 -------------------------
 local YAW_DIR = "bottom"
 local YAW_BRAKE = "left"
@@ -81,7 +84,7 @@ local function receiver()
 end
 
 -------------------------
--- ANGLE CALC
+-- ANGLES
 -------------------------
 local function calcAngles(t)
     local cx, cy, cz = cannon.getX(), cannon.getY(), cannon.getZ()
@@ -98,61 +101,15 @@ local function calcAngles(t)
 end
 
 -------------------------
--- CORE CONTROL (MINIMAL)
+-- FIRE
 -------------------------
-
-local function yawControl(err)
-    redstone.setOutput(YAW_DIR, err > 0)
-
-    local brake = clamp(math.abs(err) * 1.2, 0, 15)
-    redstone.setAnalogOutput(YAW_BRAKE, brake)
-
-    return math.abs(err) < DEAD_ZONE
-end
-
-local function pitchControl(err)
-
-    redstone.setOutput(PITCH_DIR, err > 0)
-
-    local brake = clamp(math.abs(err) * 1.2, 0, 15)
-    redstone.setAnalogOutput(PITCH_BRAKE, brake)
-
-    return math.abs(err) < DEAD_ZONE
-end
-
--------------------------
--- DEBUG DISPLAY
--------------------------
-local function debug(yawErr, pitchErr)
-
-    if not DEBUG then return end
-
-    term.setCursorPos(1,1)
-    term.clear()
-
-    print("=== CBC TURRET DEBUG MIN ===")
-
-    print("Target:", hasTarget() and "YES" or "NO")
-
-    print("")
-    print(string.format("Desired Yaw   : %.2f", desiredYaw))
-    print(string.format("Desired Pitch : %.2f", desiredPitch))
-
-    print("")
-    print(string.format("Yaw Err   : %.2f", yawErr))
-    print(string.format("Pitch Err : %.2f", pitchErr))
-
-    print("")
-    print("Yaw Dir   :", yawErr > 0 and "RIGHT" or "LEFT")
-    print("Pitch Dir :", pitchErr > 0 and "UP" or "DOWN")
-
-    print("")
-    print(string.format("Yaw Brake   : %.2f", math.abs(yawErr)))
-    print(string.format("Pitch Brake : %.2f", math.abs(pitchErr)))
-
-    print("")
-    print(string.format("Cannon Yaw   : %.2f", cannon.getYaw()))
-    print(string.format("Cannon Pitch : %.2f", cannon.getPitch()))
+local function fire(yawOK, pitchOK)
+    if yawOK and pitchOK then
+        if os.clock() - lastFire > FIRE_DELAY then
+            cannon.fire()
+            lastFire = os.clock()
+        end
+    end
 end
 
 -------------------------
@@ -172,14 +129,74 @@ local function control()
             local yawErr = angleError(desiredYaw, yaw)
             local pitchErr = desiredPitch - pitch
 
-            local yawOK = yawControl(yawErr)
-            local pitchOK = pitchControl(pitchErr)
-
-            debug(yawErr, pitchErr)
-
-        else
+            --================================================
+            -- 🔥 HARD RESET EVERY TICK (CRITICAL FIX)
+            --================================================
             redstone.setOutput(YAW_DIR, false)
             redstone.setOutput(PITCH_DIR, false)
+
+            redstone.setAnalogOutput(YAW_BRAKE, 0)
+            redstone.setAnalogOutput(PITCH_BRAKE, 0)
+
+            --================================================
+            -- YAW CONTROL (SIMPLE)
+            --================================================
+            local yawOK = math.abs(yawErr) <= DEAD_ZONE
+
+            if not yawOK then
+                redstone.setOutput(YAW_DIR, yawErr > 0)
+            else
+                redstone.setAnalogOutput(YAW_BRAKE, 15)
+            end
+
+            --================================================
+            -- PITCH CONTROL (SIMPLE)
+            --================================================
+            local pitchOK = math.abs(pitchErr) <= DEAD_ZONE
+
+            if not pitchOK then
+                redstone.setOutput(PITCH_DIR, pitchErr > 0)
+            else
+                redstone.setAnalogOutput(PITCH_BRAKE, 15)
+            end
+
+            --================================================
+            -- FIRE
+            --================================================
+            fire(yawOK, pitchOK)
+
+            --================================================
+            -- DEBUG
+            --================================================
+            if DEBUG then
+                term.setCursorPos(1,1)
+                term.clear()
+
+                print("=== CBC TURRET v5 RESET FIX ===")
+                print("Target:", true)
+
+                print("")
+                print(string.format("Yaw Err   : %.2f", yawErr))
+                print(string.format("Pitch Err : %.2f", pitchErr))
+
+                print("")
+                print("Yaw Dir   :", yawErr > 0 and "RIGHT" or "LEFT")
+                print("Pitch Dir :", pitchErr > 0 and "UP" or "DOWN")
+
+                print("")
+                print("Yaw OK   :", yawOK)
+                print("Pitch OK :", pitchOK)
+
+                print("")
+                print(string.format("Yaw   : %.2f", cannon.getYaw()))
+                print(string.format("Pitch : %.2f", cannon.getPitch()))
+            end
+
+        else
+            -- idle safe state
+            redstone.setOutput(YAW_DIR, false)
+            redstone.setOutput(PITCH_DIR, false)
+
             redstone.setAnalogOutput(YAW_BRAKE, 15)
             redstone.setAnalogOutput(PITCH_BRAKE, 15)
         end
