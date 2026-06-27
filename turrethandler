@@ -109,34 +109,33 @@ local function receiver()
     end
 end
 
--------------------------
--- CORE CONTROL (FIXED LOGIC)
--------------------------
+local function controlPitch(err)
 
-local function axisControl(err, dirSide, brakeSide, state)
+    if PITCH_INVERT then
+        err = -err
+    end
 
     local absErr = math.abs(err)
 
-    -- direction ALWAYS updated
-    redstone.setOutput(dirSide, err > 0)
+    -- direction output (ONLY sign, no logic ambiguity)
+    local dir = err > 0
 
-    -- DEAD ZONE = hard hold
-    if absErr <= DEAD_ZONE then
-        redstone.setAnalogOutput(brakeSide, HOLD_BRAKE)
-        return "HOLD"
+    redstone.setOutput(PITCH_DIR, dir)
+
+    -- IMPORTANT: prevent 90° lock
+    if absErr < DEAD_ZONE then
+        redstone.setAnalogOutput(PITCH_BRAKE, 12)
+        return true
     end
 
-    -- COAST ZONE = prevent overshoot
-    if absErr <= COAST_ZONE then
-        redstone.setAnalogOutput(brakeSide, COAST_BRAKE)
-        return "COAST"
-    end
+    -- release brake BEFORE movement (fixes “stuck at 90” bug)
+    redstone.setAnalogOutput(PITCH_BRAKE, 0)
 
-    -- MOVE ZONE = full correction
-    local power = clamp(absErr * MOVE_GAIN, 2, 15)
-    redstone.setAnalogOutput(brakeSide, 0)
+    -- proportional braking
+    local brake = math.min(absErr * 0.8, 15)
+    redstone.setAnalogOutput(PITCH_BRAKE, brake)
 
-    return "MOVE"
+    return false
 end
 
 -------------------------
