@@ -1,101 +1,11 @@
---========================================================--
--- CBC TURRET DIAGNOSTIC TEST v1
---========================================================--
-
-local modem = peripheral.find("modem")
-local cannon = peripheral.find("cbc_cannon_mount")
-
-assert(cannon, "No cannon found")
-
--- REDSTONE PINS (same as your setup)
-local YAW_DIR = "bottom"
-local YAW_BRAKE = "left"
-
-local PITCH_DIR = "top"
-local PITCH_BRAKE = "right"
-
-local state = {
-    yaw = false,
-    pitch = false,
-    yawBrake = 0,
-    pitchBrake = 0
-}
-
-local function apply()
-    redstone.setOutput(YAW_DIR, state.yaw)
-    redstone.setOutput(PITCH_DIR, state.pitch)
-
-    redstone.setAnalogOutput(YAW_BRAKE, state.yawBrake)
-    redstone.setAnalogOutput(PITCH_BRAKE, state.pitchBrake)
-end
-
-local function printStatus(label)
-    term.clear()
-    term.setCursorPos(1,1)
-
-    print("=== CBC DIAGNOSTIC TEST ===")
-    print("")
-    print(label)
-    print("")
-    print("INPUT STATE:")
-    print("Yaw Dir   :", state.yaw and "RIGHT" or "LEFT/OFF")
-    print("Pitch Dir :", state.pitch and "UP" or "DOWN/OFF")
-    print("Yaw Brake :", state.yawBrake)
-    print("Pitch Brake:", state.pitchBrake)
-
-    print("")
-    print("CANNON FEEDBACK:")
-    print("Yaw   :", cannon.getYaw())
-    print("Pitch :", cannon.getPitch())
-end
-
-local function step(label, fn, t)
-    fn()
-    apply()
-    printStatus(label)
-    sleep(t or 2)
-end
-
 while true do
+    redstone.setOutput("top", true)
+    redstone.setAnalogOutput("right", 15)
 
-    step("STEP 1: ALL OFF (baseline)", function()
-        state.yaw = false
-        state.pitch = false
-        state.yawBrake = 0
-        state.pitchBrake = 0
-    end)
+    sleep(0.2)
 
-    step("STEP 2: PITCH UP ONLY", function()
-        state.pitch = true
-        state.pitchBrake = 0
-    end)
+    redstone.setOutput("top", false)
+    redstone.setAnalogOutput("right", 0)
 
-    step("STEP 3: PITCH DOWN ONLY", function()
-        state.pitch = false
-        state.pitchBrake = 0
-    end)
-
-    step("STEP 4: PITCH BRAKE FULL", function()
-        state.pitchBrake = 15
-    end)
-
-    step("STEP 5: PITCH BRAKE OFF", function()
-        state.pitchBrake = 0
-    end)
-
-    step("STEP 6: YAW RIGHT ONLY", function()
-        state.yaw = true
-        state.yawBrake = 0
-    end)
-
-    step("STEP 7: YAW LEFT ONLY", function()
-        state.yaw = false
-        state.yawBrake = 0
-    end)
-
-    step("STEP 8: ALL BRAKES FULL (RESET TEST)", function()
-        state.yawBrake = 15
-        state.pitchBrake = 15
-    end)
-
+    sleep(0.2)
 end
