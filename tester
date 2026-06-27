@@ -1,0 +1,30 @@
+local cannon = peripheral.find("cbc_cannon_mount")
+
+local YAW_DIR = "bottom"
+local YAW_BRAKE = "left"
+
+local PITCH_DIR = "top"
+local PITCH_BRAKE = "right"
+
+print("HARDWARE TEST START")
+
+while true do
+
+    print("FORWARD YAW")
+    redstone.setOutput(YAW_DIR, true)
+    redstone.setAnalogOutput(YAW_BRAKE, 0)
+    sleep(2)
+
+    print("STOP YAW")
+    redstone.setAnalogOutput(YAW_BRAKE, 15)
+    sleep(2)
+
+    print("FORWARD PITCH")
+    redstone.setOutput(PITCH_DIR, true)
+    redstone.setAnalogOutput(PITCH_BRAKE, 0)
+    sleep(2)
+
+    print("STOP PITCH")
+    redstone.setAnalogOutput(PITCH_BRAKE, 15)
+    sleep(2)
+end
