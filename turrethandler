@@ -93,24 +93,23 @@ local function control()
       local dyaw, dpitch = calcAngles(target)
       local cyaw = norm(cannon.getYaw())
       local cpitch = cannon.getPitch()
-
-      local yawErr = angleError(dyaw, cyaw)
       local pitchErr = dpitch - cpitch
 
--- PURE PROPORTIONAL YAW (correct for motor-driven rotation systems)
-
       local yawErr = angleError(dyaw, cyaw)
 
-      local deadzone = CONFIG.DEADZONE or 1.0
+      local deadzone = CONFIG.FINAL_DEADZONE or 1.0
 
-      if math.abs(yawErr) < deadzone then
+      if math.abs(yawErr) <= deadzone then
+        -- stop all yaw movement completely
         redstone.setOutput(YAW_DIR, false)
         redstone.setAnalogOutput(YAW_POWER, 0)
       else
-        local dir = yawErr > 0
-        local power = math.min(CONFIG.MAX_VELOCITY, math.abs(yawErr) * 0.8)
+        -- direction only
+        redstone.setOutput(YAW_DIR, yawErr > 0)
 
-        redstone.setOutput(YAW_DIR, dir)
+        -- proportional power (this is the ONLY control signal)
+        local power = math.min(15, math.abs(yawErr) * 0.6)
+
         redstone.setAnalogOutput(YAW_POWER, power)
       end
       -- =========================
