@@ -1,5 +1,5 @@
 --========================================================--
--- CBC AWACS TURRET CONTROLLER v5.0 (ANTI-STALL BUILD)
+-- CBC AWACS TURRET CONTROLLER v6.0 (LINK-STABLE)
 --========================================================--
 
 -------------------------
@@ -10,16 +10,12 @@ local UPDATE_RATE = 0.05
 local TARGET_TIMEOUT = 5
 
 local DEAD_ZONE = 1.8
-local MAX_BRAKE = 12
-local GAIN = 0.8
+local SOFT_ZONE = 10
 
 local YAW_OFFSET = 90
 local FIRE_DELAY = 0.5
 
--- pitch anti-stick tuning
-local PITCH_MIN = 5
-local PITCH_MAX = 85
-local STALL_TIME = 0.35
+local BRAKE_MAX = 12
 
 -------------------------
 -- PERIPHERALS
@@ -43,8 +39,6 @@ local desiredPitch = 0
 
 local lastFire = 0
 
-local pitchStuckTimer = 0
-
 -------------------------
 -- REDSTONE MAP
 -------------------------
@@ -57,6 +51,10 @@ local PITCH_BRAKE = "right"
 -------------------------
 -- HELPERS
 -------------------------
+local function clamp(x, a, b)
+    return math.max(a, math.min(b, x))
+end
+
 local function norm(a)
     a = a % 360
     if a < 0 then a = a + 360 end
@@ -92,7 +90,7 @@ end
 -------------------------
 local function receiver()
     while true do
-        local _, _, ch, _, msg = os.pullEvent("modem_message")
+        local _,_,ch,_,msg = os.pullEvent("modem_message")
 
         if ch == CHANNEL and type(msg) == "table" and msg.type == "PLANE" then
             target = { x = msg.x, y = msg.y, z = msg.z }
@@ -102,61 +100,40 @@ local function receiver()
 end
 
 -------------------------
--- YAW (unchanged - works)
+-- AIM UPDATE
 -------------------------
-local function controlYaw(err)
+local function updateAim()
+    if not hasTarget() then return end
+    desiredYaw, desiredPitch = calcAngles(target)
+end
+
+-------------------------
+-- CORE SERVO (CLEAN / NO LATCH LOGIC)
+-------------------------
+local function servo(err, dirSide, brakeSide)
 
     local absErr = math.abs(err)
 
-    redstone.setOutput(YAW_DIR, err > 0)
+    -- direction is ALWAYS explicitly set
+    redstone.setOutput(dirSide, err > 0)
 
-    local brake = math.min(MAX_BRAKE, absErr * GAIN)
-    redstone.setAnalogOutput(YAW_BRAKE, brake)
+    -- smooth proportional braking
+    local brake = absErr * 0.8
+
+    -- soften near target
+    if absErr < SOFT_ZONE then
+        brake = brake * (absErr / SOFT_ZONE)
+    end
+
+    brake = clamp(brake, 0, BRAKE_MAX)
+
+    redstone.setAnalogOutput(brakeSide, brake)
 
     return absErr < DEAD_ZONE
 end
 
 -------------------------
--- PITCH (FIXED ANTI-STALL CORE)
--------------------------
-local function controlPitch(err, pitch)
-
-    local absErr = math.abs(err)
-
-    -- detect stall at extremes
-    if pitch > PITCH_MAX and err > 0 then
-        pitchStuckTimer = pitchStuckTimer + UPDATE_RATE
-        err = -1
-    elseif pitch < PITCH_MIN and err < 0 then
-        pitchStuckTimer = pitchStuckTimer + UPDATE_RATE
-        err = 1
-    else
-        pitchStuckTimer = 0
-    end
-
-    -- force escape if stuck too long
-    if pitchStuckTimer > STALL_TIME then
-        redstone.setOutput(PITCH_DIR, not redstone.getOutput(PITCH_DIR))
-        redstone.setAnalogOutput(PITCH_BRAKE, 0)
-        return false
-    end
-
-    redstone.setOutput(PITCH_DIR, err > 0)
-
-    local brake = math.min(MAX_BRAKE, absErr * GAIN)
-
-    -- IMPORTANT: allow movement window
-    if absErr < 4 then
-        brake = brake * 0.4
-    end
-
-    redstone.setAnalogOutput(PITCH_BRAKE, brake)
-
-    return absErr < DEAD_ZONE
-end
-
--------------------------
--- FIRE
+-- FIRE CONTROL
 -------------------------
 local function fire(yawOK, pitchOK)
     if yawOK and pitchOK then
@@ -168,15 +145,7 @@ local function fire(yawOK, pitchOK)
 end
 
 -------------------------
--- AIM
--------------------------
-local function updateAim()
-    if not hasTarget() then return end
-    desiredYaw, desiredPitch = calcAngles(target)
-end
-
--------------------------
--- MAIN
+-- MAIN LOOP
 -------------------------
 local function control()
 
@@ -192,12 +161,13 @@ local function control()
             local yawErr = angleError(desiredYaw, yaw)
             local pitchErr = desiredPitch - pitch
 
-            local yawOK = controlYaw(yawErr)
-            local pitchOK = controlPitch(pitchErr, pitch)
+            local yawOK = servo(yawErr, YAW_DIR, YAW_BRAKE)
+            local pitchOK = servo(pitchErr, PITCH_DIR, PITCH_BRAKE)
 
             fire(yawOK, pitchOK)
 
         else
+            -- FULL deterministic reset every tick (IMPORTANT)
             redstone.setOutput(YAW_DIR, false)
             redstone.setOutput(PITCH_DIR, false)
             redstone.setAnalogOutput(YAW_BRAKE, 0)
