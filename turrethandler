@@ -1,5 +1,5 @@
 --========================================================--
--- CBC AWACS TURRET CONTROLLER v5.0 (SELF-RECOVERY BUILD)
+-- CBC AWACS TURRET CONTROLLER v5.0 (ANTI-STALL BUILD)
 --========================================================--
 
 -------------------------
@@ -9,17 +9,17 @@ local CHANNEL = 1
 local UPDATE_RATE = 0.05
 local TARGET_TIMEOUT = 5
 
-local DEAD_ZONE = 2
-local SOFT_ZONE = 12
+local DEAD_ZONE = 1.8
+local MAX_BRAKE = 12
+local GAIN = 0.8
 
 local YAW_OFFSET = 90
 local FIRE_DELAY = 0.5
 
-local DEBUG = true
-
--- pitch safety (IMPORTANT FIX)
+-- pitch anti-stick tuning
 local PITCH_MIN = 5
 local PITCH_MAX = 85
+local STALL_TIME = 0.35
 
 -------------------------
 -- PERIPHERALS
@@ -43,8 +43,7 @@ local desiredPitch = 0
 
 local lastFire = 0
 
-local lastPitch = 0
-local lastYaw = 0
+local pitchStuckTimer = 0
 
 -------------------------
 -- REDSTONE MAP
@@ -58,24 +57,20 @@ local PITCH_BRAKE = "right"
 -------------------------
 -- HELPERS
 -------------------------
-local function clamp(x,a,b)
-    return math.max(a, math.min(b, x))
-end
-
 local function norm(a)
     a = a % 360
     if a < 0 then a = a + 360 end
     return a
 end
 
-local function angleError(a,b)
+local function angleError(a, b)
     local e = (a - b) % 360
     if e > 180 then e = e - 360 end
     return e
 end
 
 local function calcAngles(t)
-    local cx,cy,cz = cannon.getX(), cannon.getY(), cannon.getZ()
+    local cx, cy, cz = cannon.getX(), cannon.getY(), cannon.getZ()
 
     local dx = t.x - cx
     local dy = t.y - cy
@@ -89,15 +84,15 @@ local function calcAngles(t)
 end
 
 local function hasTarget()
-    return target ~= nil and (os.clock() - lastPacket) < TARGET_TIMEOUT
+    return target and (os.clock() - lastPacket) < TARGET_TIMEOUT
 end
 
 -------------------------
--- TARGET RECEIVER
+-- RECEIVER
 -------------------------
 local function receiver()
     while true do
-        local _,_,ch,_,msg = os.pullEvent("modem_message")
+        local _, _, ch, _, msg = os.pullEvent("modem_message")
 
         if ch == CHANNEL and type(msg) == "table" and msg.type == "PLANE" then
             target = { x = msg.x, y = msg.y, z = msg.z }
@@ -107,15 +102,7 @@ local function receiver()
 end
 
 -------------------------
--- AIM UPDATE
--------------------------
-local function updateAim()
-    if not hasTarget() then return end
-    desiredYaw, desiredPitch = calcAngles(target)
-end
-
--------------------------
--- YAW CONTROL (STABLE)
+-- YAW (unchanged - works)
 -------------------------
 local function controlYaw(err)
 
@@ -123,57 +110,53 @@ local function controlYaw(err)
 
     redstone.setOutput(YAW_DIR, err > 0)
 
-    local brake = 0
-    if absErr < SOFT_ZONE then
-        brake = (1 - absErr / SOFT_ZONE) * 10
-    end
-
-    brake = clamp(brake, 0, 15)
+    local brake = math.min(MAX_BRAKE, absErr * GAIN)
     redstone.setAnalogOutput(YAW_BRAKE, brake)
 
-    return absErr <= DEAD_ZONE
+    return absErr < DEAD_ZONE
 end
 
 -------------------------
--- PITCH CONTROL (FIXED STALL + LIMIT RECOVERY)
+-- PITCH (FIXED ANTI-STALL CORE)
 -------------------------
-local pitchTimer = 0
-local PITCH_PULSE = 0.12
-
-local function controlPitch(err, dt)
+local function controlPitch(err, pitch)
 
     local absErr = math.abs(err)
 
-    -- HOLD ZONE
-    if absErr <= DEAD_ZONE then
-        redstone.setOutput(PITCH_DIR, false)
-        redstone.setAnalogOutput(PITCH_BRAKE, 15)
-        return true
+    -- detect stall at extremes
+    if pitch > PITCH_MAX and err > 0 then
+        pitchStuckTimer = pitchStuckTimer + UPDATE_RATE
+        err = -1
+    elseif pitch < PITCH_MIN and err < 0 then
+        pitchStuckTimer = pitchStuckTimer + UPDATE_RATE
+        err = 1
+    else
+        pitchStuckTimer = 0
     end
 
-    -- direction
+    -- force escape if stuck too long
+    if pitchStuckTimer > STALL_TIME then
+        redstone.setOutput(PITCH_DIR, not redstone.getOutput(PITCH_DIR))
+        redstone.setAnalogOutput(PITCH_BRAKE, 0)
+        return false
+    end
+
     redstone.setOutput(PITCH_DIR, err > 0)
 
-    -- PULSE MOVEMENT (KEY FIX)
-    pitchTimer = pitchTimer + dt
+    local brake = math.min(MAX_BRAKE, absErr * GAIN)
 
-    if pitchTimer >= PITCH_PULSE then
-        pitchTimer = 0
+    -- IMPORTANT: allow movement window
+    if absErr < 4 then
+        brake = brake * 0.4
     end
 
-    if pitchTimer < PITCH_PULSE * 0.5 then
-        -- allow movement
-        redstone.setAnalogOutput(PITCH_BRAKE, 0)
-    else
-        -- brief damping window
-        redstone.setAnalogOutput(PITCH_BRAKE, 6)
-    end
+    redstone.setAnalogOutput(PITCH_BRAKE, brake)
 
-    return false
+    return absErr < DEAD_ZONE
 end
 
 -------------------------
--- FIRE CONTROL
+-- FIRE
 -------------------------
 local function fire(yawOK, pitchOK)
     if yawOK and pitchOK then
@@ -185,36 +168,15 @@ local function fire(yawOK, pitchOK)
 end
 
 -------------------------
--- DEBUG
+-- AIM
 -------------------------
-local function debug(yawErr, pitchErr, pitch)
-
-    if not DEBUG then return end
-
-    term.setCursorPos(1,1)
-    term.clear()
-
-    print("=== CBC TURRET v5 DEBUG ===")
-    print("Target:", hasTarget() and "YES" or "NO")
-
-    print("")
-    print("Yaw Err:", yawErr)
-    print("Pitch Err:", pitchErr)
-
-    print("")
-    print("Desired Yaw:", desiredYaw)
-    print("Desired Pitch:", desiredPitch)
-
-    print("")
-    print("Current Pitch:", pitch)
-
-    print("")
-    print("Yaw Dir:", yawErr > 0 and "RIGHT" or "LEFT")
-    print("Pitch Dir:", pitchErr > 0 and "UP" or "DOWN")
+local function updateAim()
+    if not hasTarget() then return end
+    desiredYaw, desiredPitch = calcAngles(target)
 end
 
 -------------------------
--- MAIN LOOP
+-- MAIN
 -------------------------
 local function control()
 
@@ -235,13 +197,11 @@ local function control()
 
             fire(yawOK, pitchOK)
 
-            debug(yawErr, pitchErr, pitch)
-
         else
             redstone.setOutput(YAW_DIR, false)
             redstone.setOutput(PITCH_DIR, false)
-            redstone.setAnalogOutput(YAW_BRAKE, 15)
-            redstone.setAnalogOutput(PITCH_BRAKE, 15)
+            redstone.setAnalogOutput(YAW_BRAKE, 0)
+            redstone.setAnalogOutput(PITCH_BRAKE, 0)
         end
 
         sleep(UPDATE_RATE)
