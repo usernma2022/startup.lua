@@ -1,6 +1,6 @@
 --========================================================--
--- CBC AWACS TURRET CONTROLLER v5.3 (HYBRID FIX)
--- Yaw = PID | Pitch = Lift-Only Control
+-- CBC AWACS TURRET CONTROLLER v6.0 (STABLE RELEASE)
+-- Yaw = PID | Pitch = Lift + Soft Brake Model
 --========================================================--
 
 -------------------------
@@ -17,9 +17,9 @@ local KP, KI, KD = 1.3, 0.015, 0.55
 local INTEGRAL_LIMIT = 50
 local OUTPUT_LIMIT = 15
 
--- PITCH (lift-only tuning)
-local PITCH_STEP_POWER = 15
+-- PITCH MODEL (your working system)
 local PITCH_DEADZONE = 1.5
+local PITCH_SLOWZONE = 8
 
 -------------------------
 -- PERIPHERALS
@@ -104,22 +104,33 @@ local function yawPID(err, dt)
 end
 
 -------------------------
--- PITCH LIFT CONTROL (CRITICAL FIX)
+-- PITCH CONTROL (FINAL STABLE MODEL)
 -------------------------
 local function pitchControl(err)
 
-    -- ONLY UPWARD AUTHORITY EXISTS
+    local absErr = math.abs(err)
+
+    -- 🔼 LIFT CONTROL (only real motion direction)
     if err > PITCH_DEADZONE then
         redstone.setOutput("top", true)
-        redstone.setAnalogOutput("right", PITCH_STEP_POWER)
-        return false
+    else
+        redstone.setOutput("top", false)
     end
 
-    -- STOP APPLYING FORCE (do NOT try to go down)
-    redstone.setOutput("top", false)
-    redstone.setAnalogOutput("right", 0)
+    -- 🔥 SOFT BRAKE MODEL (your working fix)
+    local brake = 0
 
-    return math.abs(err) <= PITCH_DEADZONE
+    if absErr < PITCH_SLOWZONE then
+        -- smooth decay into stop
+        brake = (1 - (absErr / PITCH_SLOWZONE)) * 15
+    else
+        brake = 15
+    end
+
+    brake = clamp(brake, 0, 15)
+    redstone.setAnalogOutput("right", brake)
+
+    return absErr < PITCH_DEADZONE
 end
 
 -------------------------
@@ -143,7 +154,7 @@ local function control()
             local yawErr = angleError(desiredYaw, yaw)
             local pitchErr = desiredPitch - pitch
 
-            -- YAW (full PID)
+            -- YAW (PID)
             local yawOut = yawPID(yawErr, dt)
 
             local yawDir = yawOut > 0
@@ -152,10 +163,10 @@ local function control()
             redstone.setOutput("bottom", yawDir)
             redstone.setAnalogOutput("left", yawPower)
 
-            -- PITCH (lift-only)
+            -- PITCH (lift + brake)
             local pitchOK = pitchControl(pitchErr)
 
-            -- FIRE ONLY WHEN STABLE
+            -- FIRE CONDITION (stable aim)
             if math.abs(yawErr) < 2 and pitchOK then
                 cannon.fire()
             end
@@ -164,13 +175,12 @@ local function control()
             term.setCursorPos(1,1)
             term.clear()
 
-            print("CBC TURRET v5.3 (HYBRID)")
+            print("CBC TURRET v6.0 (STABLE)")
             print("------------------------")
             print("Yaw Err  :", yawErr)
             print("Pitch Err:", pitchErr)
             print("")
             print("Yaw Out  :", yawOut)
-            print("Pitch Mode: LIFT ONLY")
             print("Pitch OK :", pitchOK)
 
         else
