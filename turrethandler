@@ -1,6 +1,5 @@
--- turret_v6.3.lua
--- Clean rewrite for CBC AWACS turret controller
--- Uses resistance-based yaw/pitch control (NOT PID motor model)
+-- turret_v5.4.lua
+-- Inertial tracking controller (fast approach + natural oscillation)
 
 local CONFIG = {
   CHANNEL = 1,
@@ -9,9 +8,12 @@ local CONFIG = {
   YAW_OFFSET = 90,
   FIRE_DELAY = 0.5,
 
-  DEADZONE = 1.0,
+  DEADZONE = 0.5,
 
-  -- axis calibration (FIX THIS ONCE ONLY)
+  -- tuning (MAIN CONTROL KNOB)
+  YAW_GAIN = 0.35,
+  PITCH_GAIN = 0.35,
+
   AXIS_INVERT = {
     YAW = -1,
     PITCH = 1
@@ -28,12 +30,12 @@ local target = nil
 local lastPacket = 0
 local lastFire = 0
 
--- wiring (your setup)
-local YAW_DIR, YAW_BRAKE = "bottom", "left"
-local PITCH_DIR, PITCH_BRAKE = "top", "right"
+-- redstone mapping
+local YAW_DIR, YAW_POWER = "bottom", "left"
+local PITCH_DIR, PITCH_POWER = "top", "right"
 
--- math helpers
-local function clamp(x,a,b)
+-- utils
+local function clamp(x, a, b)
   return math.max(a, math.min(b, x))
 end
 
@@ -43,47 +45,28 @@ local function norm(a)
   return a
 end
 
-local function angleError(a,b)
+local function angleError(a, b)
   local e = (a - b) % 360
   if e > 180 then e = e - 360 end
   return e
 end
 
--- compute target angles
+-- target angles
 local function calcAngles(t)
-  local cx,cy,cz = cannon.getX(), cannon.getY(), cannon.getZ()
-  local dx,dy,dz = t.x-cx, t.y-cy, t.z-cz
+  local cx, cy, cz = cannon.getX(), cannon.getY(), cannon.getZ()
+  local dx, dy, dz = t.x - cx, t.y - cy, t.z - cz
 
   local yaw = math.deg(math.atan2(dz, dx)) + CONFIG.YAW_OFFSET
-  local horiz = math.sqrt(dx*dx + dz*dz)
+  local horiz = math.sqrt(dx * dx + dz * dz)
   local pitch = math.deg(math.atan2(dy, horiz))
 
   return yaw, pitch
 end
 
--- resistance mapping (this is your real control model)
-local function resistanceFromError(err)
-  local a = math.abs(err)
-
-  if a < 1 then
-    return 15 -- full lock
-  elseif a < 3 then
-    return 12
-  elseif a < 8 then
-    return 9
-  elseif a < 15 then
-    return 6
-  elseif a < 25 then
-    return 3
-  else
-    return 0 -- free rotation when far
-  end
-end
-
--- receiver thread
+-- receiver
 local function receiver()
   while true do
-    local _,_,ch,_,msg = os.pullEvent("modem_message")
+    local _, _, ch, _, msg = os.pullEvent("modem_message")
     if ch == CONFIG.CHANNEL and type(msg) == "table" and msg.type == "PLANE" then
       target = msg
       lastPacket = os.clock()
@@ -103,40 +86,39 @@ local function control()
       local cyaw = norm(cannon.getYaw())
       local cpitch = cannon.getPitch()
 
-      -- ERROR SPACE (corrected per axis)
+      -- ERROR SPACE
       local yawErr = angleError(dyaw, cyaw) * CONFIG.AXIS_INVERT.YAW
       local pitchErr = (dpitch - cpitch) * CONFIG.AXIS_INVERT.PITCH
 
       -- =========================
-      -- YAW CONTROL (RESISTANCE MODEL)
+      -- YAW (INERTIAL OSCILLATION MODEL)
       -- =========================
-      local yawBrake = resistanceFromError(yawErr)
+      local yawPower = clamp(math.abs(yawErr) * CONFIG.YAW_GAIN, 0, 15)
       local yawDir = yawErr > 0
 
       if math.abs(yawErr) < CONFIG.DEADZONE then
-        yawBrake = 15
-        yawDir = false
+        -- do NOT lock, allow natural overshoot decay
+        yawPower = 0
       end
 
       redstone.setOutput(YAW_DIR, yawDir)
-      redstone.setAnalogOutput(YAW_BRAKE, yawBrake)
+      redstone.setAnalogOutput(YAW_POWER, yawPower)
 
       -- =========================
-      -- PITCH CONTROL (same model)
+      -- PITCH (same model)
       -- =========================
-      local pitchBrake = resistanceFromError(pitchErr)
+      local pitchPower = clamp(math.abs(pitchErr) * CONFIG.PITCH_GAIN, 0, 15)
       local pitchDir = pitchErr > 0
 
       if math.abs(pitchErr) < CONFIG.DEADZONE then
-        pitchBrake = 15
-        pitchDir = false
+        pitchPower = 0
       end
 
       redstone.setOutput(PITCH_DIR, pitchDir)
-      redstone.setAnalogOutput(PITCH_BRAKE, pitchBrake)
+      redstone.setAnalogOutput(PITCH_POWER, pitchPower)
 
       -- =========================
-      -- FIRE CONTROL
+      -- FIRE
       -- =========================
       if math.abs(yawErr) < 1 and math.abs(pitchErr) < 1 then
         if now - lastFire > CONFIG.FIRE_DELAY then
@@ -149,17 +131,15 @@ local function control()
       term.setCursorPos(1,1)
       term.clear()
 
-      print("CBC Turret v7 (clean rewrite)")
+      print("CBC Turret v8 (inertial tracking)")
       print(("YawErr: %.2f  PitchErr: %.2f"):format(yawErr, pitchErr))
-      print(("YawBrake: %d  PitchBrake: %d"):format(yawBrake, pitchBrake))
+      print(("YawPower: %.2f  PitchPower: %.2f"):format(yawPower, pitchPower))
 
     else
-      -- safe state
       redstone.setOutput(YAW_DIR, false)
       redstone.setOutput(PITCH_DIR, false)
-
-      redstone.setAnalogOutput(YAW_BRAKE, 15)
-      redstone.setAnalogOutput(PITCH_BRAKE, 15)
+      redstone.setAnalogOutput(YAW_POWER, 0)
+      redstone.setAnalogOutput(PITCH_POWER, 0)
     end
 
     sleep(CONFIG.UPDATE_RATE)
