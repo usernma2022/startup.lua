@@ -1,12 +1,29 @@
 --========================================================--
--- CBC TURRET v5 (STATE MACHINE BASELINE)
+-- CBC AWACS TURRET CONTROLLER v5 (PID STABLE)
 --========================================================--
 
+-------------------------
+-- CONFIG
+-------------------------
 local CHANNEL = 1
 local UPDATE_RATE = 0.05
-local DEAD_ZONE = 1.5
+local TARGET_TIMEOUT = 5
+
 local YAW_OFFSET = 90
 
+-- PID tuning (you WILL tweak these slightly)
+local KP = 1.4
+local KI = 0.02
+local KD = 0.6
+
+local INTEGRAL_LIMIT = 50
+local OUTPUT_LIMIT = 15
+
+local DEAD_ZONE = 1.2
+
+-------------------------
+-- PERIPHERALS
+-------------------------
 local modem = peripheral.find("modem")
 local cannon = peripheral.find("cbc_cannon_mount")
 
@@ -15,28 +32,30 @@ assert(cannon, "No cannon")
 
 modem.open(CHANNEL)
 
--- REDSTONE MAP
-local YAW_DIR = "bottom"
-local YAW_BRAKE = "left"
-
-local PITCH_DIR = "top"
-local PITCH_BRAKE = "right"
-
+-------------------------
 -- STATE
+-------------------------
 local target = nil
 local lastPacket = 0
 
-local desiredYaw = 0
-local desiredPitch = 0
+local lastTime = os.clock()
 
-local lastYawState = nil
-local lastPitchState = nil
+-- PID state
+local yawI, yawPrev = 0, 0
+local pitchI, pitchPrev = 0, 0
+
+-- redstone state cache
+local lastYawDir = nil
+local lastPitchDir = nil
 local lastYawBrake = -1
 local lastPitchBrake = -1
 
----------------------------------------------------------
--- MATH
----------------------------------------------------------
+-------------------------
+-- HELPERS
+-------------------------
+local function clamp(x, a, b)
+    return math.max(a, math.min(b, x))
+end
 
 local function norm(a)
     a = a % 360
@@ -64,10 +83,9 @@ local function calcAngles(t)
     return yaw, pitch
 end
 
----------------------------------------------------------
+-------------------------
 -- INPUT
----------------------------------------------------------
-
+-------------------------
 local function receiver()
     while true do
         local _,_,ch,_,msg = os.pullEvent("modem_message")
@@ -79,51 +97,54 @@ local function receiver()
     end
 end
 
----------------------------------------------------------
--- STATE APPLY (ONLY WHEN CHANGED)
----------------------------------------------------------
+-------------------------
+-- PID CORE
+-------------------------
+local function pid(err, dt, i, prev)
 
-local function setYaw(state, brake)
-    if state ~= lastYawState then
-        if state == "LEFT" then redstone.setOutput(YAW_DIR, false) end
-        if state == "RIGHT" then redstone.setOutput(YAW_DIR, true) end
-        if state == "HOLD" then redstone.setOutput(YAW_DIR, false) end
+    i = i + err * dt
+    i = clamp(i, -INTEGRAL_LIMIT, INTEGRAL_LIMIT)
 
-        lastYawState = state
-    end
+    local d = (err - prev) / dt
 
-    if brake ~= lastYawBrake then
-        redstone.setAnalogOutput(YAW_BRAKE, brake)
-        lastYawBrake = brake
-    end
+    local out = KP * err + KI * i + KD * d
+    out = clamp(out, -OUTPUT_LIMIT, OUTPUT_LIMIT)
+
+    return out, i, err
 end
 
-local function setPitch(state, brake)
-    if state ~= lastPitchState then
-        if state == "DOWN" then redstone.setOutput(PITCH_DIR, false) end
-        if state == "UP" then redstone.setOutput(PITCH_DIR, true) end
-        if state == "HOLD" then redstone.setOutput(PITCH_DIR, false) end
+-------------------------
+-- REDSTONE APPLY (STATEFUL)
+-------------------------
+local function setAxis(dirSide, brakeSide, dir, power, lastDir, lastBrake)
 
-        lastPitchState = state
+    if dir ~= lastDir then
+        redstone.setOutput(dirSide, dir)
+        lastDir = dir
     end
 
-    if brake ~= lastPitchBrake then
-        redstone.setAnalogOutput(PITCH_BRAKE, brake)
-        lastPitchBrake = brake
+    if power ~= lastBrake then
+        redstone.setAnalogOutput(brakeSide, power)
+        lastBrake = power
     end
+
+    return lastDir, lastBrake
 end
 
----------------------------------------------------------
+-------------------------
 -- CONTROL LOOP
----------------------------------------------------------
-
+-------------------------
 local function control()
 
     while true do
 
-        if target and (os.clock() - lastPacket < 5) then
+        local now = os.clock()
+        local dt = now - lastTime
+        lastTime = now
 
-            desiredYaw, desiredPitch = calcAngles(target)
+        if target and (now - lastPacket < TARGET_TIMEOUT) then
+
+            local desiredYaw, desiredPitch = calcAngles(target)
 
             local yaw = norm(cannon.getYaw())
             local pitch = cannon.getPitch()
@@ -131,43 +152,48 @@ local function control()
             local yawErr = angleError(desiredYaw, yaw)
             local pitchErr = desiredPitch - pitch
 
-            -- YAW STATE
-            local yawState, yawBrake
-            if math.abs(yawErr) <= DEAD_ZONE then
-                yawState = "HOLD"
-                yawBrake = 10
-            else
-                yawState = yawErr > 0 and "RIGHT" or "LEFT"
-                yawBrake = 0
-            end
+            -- PID
+            local yawOut
+            yawOut, yawI, yawPrev = pid(yawErr, dt, yawI, yawPrev)
 
-            -- PITCH STATE
-            local pitchState, pitchBrake
-            if math.abs(pitchErr) <= DEAD_ZONE then
-                pitchState = "HOLD"
-                pitchBrake = 10
-            else
-                pitchState = pitchErr > 0 and "UP" or "DOWN"
-                pitchBrake = 0
-            end
+            local pitchOut
+            pitchOut, pitchI, pitchPrev = pid(pitchErr, dt, pitchI, pitchPrev)
 
-            setYaw(yawState, yawBrake)
-            setPitch(pitchState, pitchBrake)
+            -- direction conversion
+            local yawDir = yawOut > 0
+            local pitchDir = pitchOut > 0
 
+            local yawPower = math.abs(yawOut)
+            local pitchPower = math.abs(pitchOut)
+
+            -- deadzone stop
+            if math.abs(yawErr) < DEAD_ZONE then yawPower = 10 end
+            if math.abs(pitchErr) < DEAD_ZONE then pitchPower = 10 end
+
+            -- apply
+            lastYawDir, lastYawBrake =
+                setAxis("bottom", "left", yawDir, yawPower, lastYawDir, lastYawBrake)
+
+            lastPitchDir, lastPitchBrake =
+                setAxis("top", "right", pitchDir, pitchPower, lastPitchDir, lastPitchBrake)
+
+            -- debug
             term.setCursorPos(1,1)
             term.clear()
 
-            print("CBC TURRET v5 BASELINE")
-            print("----------------------")
+            print("CBC TURRET v5 PID")
+            print("-----------------")
             print("Yaw Err  :", yawErr)
             print("Pitch Err:", pitchErr)
             print()
-            print("Yaw State  :", yawState)
-            print("Pitch State:", pitchState)
+            print("Yaw Out  :", yawOut)
+            print("Pitch Out:", pitchOut)
 
         else
-            setYaw("HOLD", 15)
-            setPitch("HOLD", 15)
+            redstone.setOutput("bottom", false)
+            redstone.setOutput("top", false)
+            redstone.setAnalogOutput("left", 0)
+            redstone.setAnalogOutput("right", 0)
         end
 
         sleep(UPDATE_RATE)
