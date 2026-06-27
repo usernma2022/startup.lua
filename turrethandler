@@ -1,54 +1,43 @@
 --========================================================--
--- CBC AWACS TURRET CONTROLLER v6.0 (PULSE RESET FIX)
+-- CBC TURRET v5 (STATE MACHINE BASELINE)
 --========================================================--
 
--------------------------
--- CONFIG
--------------------------
 local CHANNEL = 1
 local UPDATE_RATE = 0.05
-local TARGET_TIMEOUT = 5
-
-local DEAD_ZONE = 2
+local DEAD_ZONE = 1.5
 local YAW_OFFSET = 90
 
-local FIRE_DELAY = 0.5
-local DEBUG = true
-
--------------------------
--- PERIPHERALS
--------------------------
 local modem = peripheral.find("modem")
-assert(modem, "No modem found")
-
 local cannon = peripheral.find("cbc_cannon_mount")
-assert(cannon, "No CBC Cannon Mount found")
+
+assert(modem, "No modem")
+assert(cannon, "No cannon")
 
 modem.open(CHANNEL)
 
--------------------------
--- STATE
--------------------------
-local target = nil
-local lastPacket = 0
-
-local desiredYaw = 0
-local desiredPitch = 0
-
-local lastFire = 0
-
--------------------------
 -- REDSTONE MAP
--------------------------
 local YAW_DIR = "bottom"
 local YAW_BRAKE = "left"
 
 local PITCH_DIR = "top"
 local PITCH_BRAKE = "right"
 
--------------------------
--- HELPERS
--------------------------
+-- STATE
+local target = nil
+local lastPacket = 0
+
+local desiredYaw = 0
+local desiredPitch = 0
+
+local lastYawState = nil
+local lastPitchState = nil
+local lastYawBrake = -1
+local lastPitchBrake = -1
+
+---------------------------------------------------------
+-- MATH
+---------------------------------------------------------
+
 local function norm(a)
     a = a % 360
     if a < 0 then a = a + 360 end
@@ -61,48 +50,6 @@ local function angleError(a, b)
     return e
 end
 
-local function clamp(x, a, b)
-    return math.max(a, math.min(b, x))
-end
-
--------------------------
--- HARD RESET (CRITICAL FIX)
--------------------------
-local function hardReset()
-
-    -- force state drop (prevents CBC latch issues)
-    redstone.setOutput(YAW_DIR, false)
-    redstone.setOutput(PITCH_DIR, false)
-
-    redstone.setAnalogOutput(YAW_BRAKE, 0)
-    redstone.setAnalogOutput(PITCH_BRAKE, 0)
-
-    -- tiny yield forces redstone propagation reset
-    os.queueEvent("pulse")
-    os.pullEvent("pulse")
-end
-
--------------------------
--- TARGET
--------------------------
-local function hasTarget()
-    return target and (os.clock() - lastPacket) < TARGET_TIMEOUT
-end
-
-local function receiver()
-    while true do
-        local _, _, ch, _, msg = os.pullEvent("modem_message")
-
-        if ch == CHANNEL and type(msg) == "table" and msg.type == "PLANE" then
-            target = { x = msg.x, y = msg.y, z = msg.z }
-            lastPacket = os.clock()
-        end
-    end
-end
-
--------------------------
--- ANGLES
--------------------------
 local function calcAngles(t)
     local cx, cy, cz = cannon.getX(), cannon.getY(), cannon.getZ()
 
@@ -117,29 +64,64 @@ local function calcAngles(t)
     return yaw, pitch
 end
 
--------------------------
--- FIRE
--------------------------
-local function fire(yawOK, pitchOK)
-    if yawOK and pitchOK then
-        if os.clock() - lastFire > FIRE_DELAY then
-            cannon.fire()
-            lastFire = os.clock()
+---------------------------------------------------------
+-- INPUT
+---------------------------------------------------------
+
+local function receiver()
+    while true do
+        local _,_,ch,_,msg = os.pullEvent("modem_message")
+
+        if ch == CHANNEL and type(msg) == "table" and msg.type == "PLANE" then
+            target = msg
+            lastPacket = os.clock()
         end
     end
 end
 
--------------------------
--- MAIN LOOP
--------------------------
+---------------------------------------------------------
+-- STATE APPLY (ONLY WHEN CHANGED)
+---------------------------------------------------------
+
+local function setYaw(state, brake)
+    if state ~= lastYawState then
+        if state == "LEFT" then redstone.setOutput(YAW_DIR, false) end
+        if state == "RIGHT" then redstone.setOutput(YAW_DIR, true) end
+        if state == "HOLD" then redstone.setOutput(YAW_DIR, false) end
+
+        lastYawState = state
+    end
+
+    if brake ~= lastYawBrake then
+        redstone.setAnalogOutput(YAW_BRAKE, brake)
+        lastYawBrake = brake
+    end
+end
+
+local function setPitch(state, brake)
+    if state ~= lastPitchState then
+        if state == "DOWN" then redstone.setOutput(PITCH_DIR, false) end
+        if state == "UP" then redstone.setOutput(PITCH_DIR, true) end
+        if state == "HOLD" then redstone.setOutput(PITCH_DIR, false) end
+
+        lastPitchState = state
+    end
+
+    if brake ~= lastPitchBrake then
+        redstone.setAnalogOutput(PITCH_BRAKE, brake)
+        lastPitchBrake = brake
+    end
+end
+
+---------------------------------------------------------
+-- CONTROL LOOP
+---------------------------------------------------------
+
 local function control()
 
     while true do
 
-        -- ALWAYS HARD RESET FIRST (fixes your issue)
-        hardReset()
-
-        if hasTarget() then
+        if target and (os.clock() - lastPacket < 5) then
 
             desiredYaw, desiredPitch = calcAngles(target)
 
@@ -149,62 +131,47 @@ local function control()
             local yawErr = angleError(desiredYaw, yaw)
             local pitchErr = desiredPitch - pitch
 
-            --========================
-            -- YAW CONTROL
-            --========================
-            local yawOK = math.abs(yawErr) <= DEAD_ZONE
-
-            if not yawOK then
-                redstone.setOutput(YAW_DIR, yawErr > 0)
+            -- YAW STATE
+            local yawState, yawBrake
+            if math.abs(yawErr) <= DEAD_ZONE then
+                yawState = "HOLD"
+                yawBrake = 10
+            else
+                yawState = yawErr > 0 and "RIGHT" or "LEFT"
+                yawBrake = 0
             end
 
-            --========================
-            -- PITCH CONTROL
-            --========================
-            local pitchOK = math.abs(pitchErr) <= DEAD_ZONE
-
-            if not pitchOK then
-                redstone.setOutput(PITCH_DIR, pitchErr > 0)
+            -- PITCH STATE
+            local pitchState, pitchBrake
+            if math.abs(pitchErr) <= DEAD_ZONE then
+                pitchState = "HOLD"
+                pitchBrake = 10
+            else
+                pitchState = pitchErr > 0 and "UP" or "DOWN"
+                pitchBrake = 0
             end
 
-            --========================
-            -- FIRE
-            --========================
-            fire(yawOK, pitchOK)
+            setYaw(yawState, yawBrake)
+            setPitch(pitchState, pitchBrake)
 
-            --========================
-            -- DEBUG
-            --========================
-            if DEBUG then
-                term.setCursorPos(1,1)
-                term.clear()
+            term.setCursorPos(1,1)
+            term.clear()
 
-                print("=== CBC TURRET v6 (PULSE FIX) ===")
-                print("Target:", true)
-
-                print("")
-                print(string.format("Yaw Err   : %.2f", yawErr))
-                print(string.format("Pitch Err : %.2f", pitchErr))
-
-                print("")
-                print("Yaw Dir   :", yawErr > 0 and "RIGHT" or "LEFT")
-                print("Pitch Dir :", pitchErr > 0 and "UP" or "DOWN")
-
-                print("")
-                print(string.format("Yaw   : %.2f", cannon.getYaw()))
-                print(string.format("Pitch : %.2f", cannon.getPitch()))
-            end
+            print("CBC TURRET v5 BASELINE")
+            print("----------------------")
+            print("Yaw Err  :", yawErr)
+            print("Pitch Err:", pitchErr)
+            print()
+            print("Yaw State  :", yawState)
+            print("Pitch State:", pitchState)
 
         else
-            redstone.setOutput(YAW_DIR, false)
-            redstone.setOutput(PITCH_DIR, false)
+            setYaw("HOLD", 15)
+            setPitch("HOLD", 15)
         end
 
         sleep(UPDATE_RATE)
     end
 end
 
--------------------------
--- START
--------------------------
 parallel.waitForAny(receiver, control)
