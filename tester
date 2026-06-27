@@ -1,30 +1,79 @@
-local cannon = peripheral.find("cbc_cannon_mount")
+--========================================--
+-- CBC PITCH TESTER
+--========================================--
 
-local YAW_DIR = "bottom"
-local YAW_BRAKE = "left"
+local cannon = peripheral.find("cbc_cannon_mount")
+assert(cannon, "No cannon mount found")
 
 local PITCH_DIR = "top"
 local PITCH_BRAKE = "right"
 
-print("HARDWARE TEST START")
+local dir = false
+local brake = 0
+
+local function apply()
+    redstone.setOutput(PITCH_DIR, dir)
+    redstone.setAnalogOutput(PITCH_BRAKE, brake)
+end
+
+local function resetOutputs()
+    redstone.setOutput(PITCH_DIR, false)
+    redstone.setAnalogOutput(PITCH_BRAKE, 0)
+end
+
+resetOutputs()
 
 while true do
 
-    print("FORWARD YAW")
-    redstone.setOutput(YAW_DIR, true)
-    redstone.setAnalogOutput(YAW_BRAKE, 0)
-    sleep(2)
+    term.clear()
+    term.setCursorPos(1,1)
 
-    print("STOP YAW")
-    redstone.setAnalogOutput(YAW_BRAKE, 15)
-    sleep(2)
+    print("=== CBC PITCH TEST ===")
+    print()
 
-    print("FORWARD PITCH")
-    redstone.setOutput(PITCH_DIR, true)
-    redstone.setAnalogOutput(PITCH_BRAKE, 0)
-    sleep(2)
+    print(string.format("Pitch Angle : %.2f", cannon.getPitch()))
+    print()
 
-    print("STOP PITCH")
-    redstone.setAnalogOutput(PITCH_BRAKE, 15)
-    sleep(2)
+    print("Direction   : "..tostring(dir))
+    print("Brake       : "..brake)
+
+    print()
+    print("Controls")
+    print("W = Up")
+    print("S = Down")
+    print("B = Brake 15")
+    print("N = Brake 0")
+    print("R = Reset Outputs")
+    print("Q = Quit")
+
+    local _, key = os.pullEvent("key")
+
+    if key == keys.w then
+        dir = true
+        apply()
+
+    elseif key == keys.s then
+        dir = false
+        apply()
+
+    elseif key == keys.b then
+        brake = 15
+        apply()
+
+    elseif key == keys.n then
+        brake = 0
+        apply()
+
+    elseif key == keys.r then
+        resetOutputs()
+
+        sleep(0.2)
+
+        apply()
+
+    elseif key == keys.q then
+        resetOutputs()
+        break
+    end
+
 end
