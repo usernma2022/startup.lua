@@ -1,4 +1,4 @@
--- turret_v6_1.lua
+-- turret_v6_2.lua
 -- CBC AWACS Turret Controller v6.1
 -- Skeleton architecture for VS Code.
 -- Fill PID tuning as needed.
