@@ -1,0 +1,203 @@
+--========================================================--
+-- CBC AWACS TURRET CONTROLLER v5.0 (PID STABLE SYSTEM)
+--========================================================--
+
+-------------------------
+-- CONFIG
+-------------------------
+local CHANNEL = 1
+local UPDATE_RATE = 0.05
+local TARGET_TIMEOUT = 5
+
+local YAW_OFFSET = 90
+local FIRE_DELAY = 0.5
+
+-- PID GAINS (IMPORTANT TUNING VALUES)
+local KP = 0.9
+local KI = 0.02
+local KD = 0.35
+
+local INTEGRAL_LIMIT = 50
+local MAX_OUTPUT = 15
+
+-------------------------
+-- PERIPHERALS
+-------------------------
+local modem = peripheral.find("modem")
+assert(modem, "No modem")
+
+local cannon = peripheral.find("cbc_cannon_mount")
+assert(cannon, "No CBC Cannon Mount")
+
+modem.open(CHANNEL)
+
+-------------------------
+-- STATE
+-------------------------
+local target = nil
+local lastPacket = 0
+
+local desiredYaw = 0
+local desiredPitch = 0
+
+local lastYawErr = 0
+local lastPitchErr = 0
+
+local yawI = 0
+local pitchI = 0
+
+local lastFire = 0
+
+-------------------------
+-- REDSTONE MAP
+-------------------------
+local YAW_DIR = "bottom"
+local YAW_BRAKE = "left"
+
+local PITCH_DIR = "top"
+local PITCH_BRAKE = "right"
+
+-------------------------
+-- HELPERS
+-------------------------
+local function clamp(x, a, b)
+    return math.max(a, math.min(b, x))
+end
+
+local function norm(a)
+    a = a % 360
+    if a < 0 then a = a + 360 end
+    return a
+end
+
+local function angleError(a, b)
+    local e = (a - b) % 360
+    if e > 180 then e = e - 360 end
+    return e
+end
+
+local function calcAngles(t)
+    local cx, cy, cz = cannon.getX(), cannon.getY(), cannon.getZ()
+
+    local dx = t.x - cx
+    local dy = t.y - cy
+    local dz = t.z - cz
+
+    local yaw = math.deg(math.atan2(dz, dx)) + YAW_OFFSET
+    local horiz = math.sqrt(dx*dx + dz*dz)
+    local pitch = math.deg(math.atan2(dy, horiz))
+
+    return yaw, pitch
+end
+
+local function hasTarget()
+    return target and (os.clock() - lastPacket) < TARGET_TIMEOUT
+end
+
+-------------------------
+-- RECEIVER
+-------------------------
+local function receiver()
+    while true do
+        local _, _, ch, _, msg = os.pullEvent("modem_message")
+
+        if ch == CHANNEL and type(msg) == "table" and msg.type == "PLANE" then
+            target = { x = msg.x, y = msg.y, z = msg.z }
+            lastPacket = os.clock()
+        end
+    end
+end
+
+-------------------------
+-- PID AXIS CONTROLLER
+-------------------------
+local function pid(err, lastErr, integral)
+
+    integral = integral + err
+    integral = clamp(integral, -INTEGRAL_LIMIT, INTEGRAL_LIMIT)
+
+    local derivative = err - lastErr
+
+    local output = (KP * err) + (KI * integral) + (KD * derivative)
+
+    return output, integral
+end
+
+-------------------------
+-- APPLY TO AXIS
+-------------------------
+local function applyAxis(output, dirSide, brakeSide)
+
+    local absOut = math.abs(output)
+
+    redstone.setOutput(dirSide, output > 0)
+
+    local brake = clamp(15 - absOut, 0, 15)
+    redstone.setAnalogOutput(brakeSide, brake)
+end
+
+-------------------------
+-- MAIN CONTROL
+-------------------------
+local function control()
+
+    local lastTime = os.clock()
+
+    while true do
+
+        local now = os.clock()
+        local dt = now - lastTime
+        lastTime = now
+
+        if hasTarget() then
+
+            desiredYaw, desiredPitch = calcAngles(target)
+
+            local yaw = norm(cannon.getYaw())
+            local pitch = cannon.getPitch()
+
+            local yawErr = angleError(desiredYaw, yaw)
+            local pitchErr = desiredPitch - pitch
+
+            -- PID update
+            local yawOut
+            yawOut, yawI = pid(yawErr, lastYawErr, yawI)
+
+            local pitchOut
+            pitchOut, pitchI = pid(pitchErr, lastPitchErr, pitchI)
+
+            lastYawErr = yawErr
+            lastPitchErr = pitchErr
+
+            -- clamp output
+            yawOut = clamp(yawOut, -MAX_OUTPUT, MAX_OUTPUT)
+            pitchOut = clamp(pitchOut, -MAX_OUTPUT, MAX_OUTPUT)
+
+            applyAxis(yawOut, YAW_DIR, YAW_BRAKE)
+            applyAxis(pitchOut, PITCH_DIR, PITCH_BRAKE)
+
+            -- fire when stable
+            if math.abs(yawErr) < 2 and math.abs(pitchErr) < 2 then
+                if os.clock() - lastFire > FIRE_DELAY then
+                    cannon.fire()
+                    lastFire = os.clock()
+                end
+            end
+
+        else
+            redstone.setOutput(YAW_DIR, false)
+            redstone.setOutput(PITCH_DIR, false)
+            redstone.setAnalogOutput(YAW_BRAKE, 15)
+            redstone.setAnalogOutput(PITCH_BRAKE, 15)
+
+            yawI, pitchI = 0, 0
+        end
+
+        sleep(UPDATE_RATE)
+    end
+end
+
+-------------------------
+-- START
+-------------------------
+parallel.waitForAny(receiver, control)
