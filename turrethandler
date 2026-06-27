@@ -1,4 +1,4 @@
--- turret_v6_1.lua
+-- turret_v6_2.lua
 -- CBC AWACS Turret Controller v6.1 (REAL yaw control fix)
 
 local CONFIG = {
