@@ -97,22 +97,22 @@ local function control()
       local yawErr = angleError(dyaw, cyaw)
       local pitchErr = dpitch - cpitch
 
-      -- =========================
-      -- YAW (NOW REAL CONTROL)
-      -- =========================
-      local vel = yawPID(yawErr, dt)
+-- PURE PROPORTIONAL YAW (correct for motor-driven rotation systems)
 
-      local dir = vel > 0
-      local power = math.abs(vel)
+      local yawErr = angleError(dyaw, cyaw)
 
-      redstone.setOutput(YAW_DIR, dir)
-      redstone.setAnalogOutput(YAW_POWER, power)
+      local deadzone = CONFIG.DEADZONE or 1.0
 
-      -- optional damping brake only near target
-      if math.abs(yawErr) < 2 then
-        redstone.setAnalogOutput(YAW_POWER, 3)
+      if math.abs(yawErr) < deadzone then
+        redstone.setOutput(YAW_DIR, false)
+        redstone.setAnalogOutput(YAW_POWER, 0)
+      else
+        local dir = yawErr > 0
+        local power = math.min(CONFIG.MAX_VELOCITY, math.abs(yawErr) * 0.8)
+
+        redstone.setOutput(YAW_DIR, dir)
+        redstone.setAnalogOutput(YAW_POWER, power)
       end
-
       -- =========================
       -- PITCH (unchanged style)
       -- =========================
