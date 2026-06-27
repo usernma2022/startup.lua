@@ -1,13 +1,15 @@
--- turret_v6_2.lua
+-- turret_v6_1.lua
 -- CBC AWACS Turret Controller v6.1 (REAL yaw control fix)
 
 local CONFIG = {
   CHANNEL = 1,
   UPDATE_RATE = 0.05,
   TARGET_TIMEOUT = 5,
-  YAW_OFFSET = 90,
   FIRE_DELAY = 0.5,
-
+  AXIS_INVERT = {
+    YAW = -1,
+    PITCH = 1
+  }
   KP = 0.9,
   KI = 0.01,
   KD = 0.6,
@@ -93,9 +95,9 @@ local function control()
       local dyaw, dpitch = calcAngles(target)
       local cyaw = norm(cannon.getYaw())
       local cpitch = cannon.getPitch()
-      local pitchErr = dpitch - cpitch
+      local pitchErr = (dpitch - cpitch) * CONFIG.AXIS_INVERT.PITCH
 
-      local yawErr = angleError(dyaw, cyaw)
+      local yawErr = angleError(dyaw, cyaw) * CONFIG.AXIS_INVERT.YAW
 
       -- normalize error into resistance strength
       local absErr = math.min(math.abs(yawErr), 30)
