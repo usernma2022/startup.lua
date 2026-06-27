@@ -1,6 +1,6 @@
 --========================================================--
--- CBC AWACS TURRET CONTROLLER v6.0 (STABLE RELEASE)
--- Yaw = PID | Pitch = Lift + Soft Brake Model
+-- CBC AWACS TURRET CONTROLLER v6.1 (DAMPING-AWARE FIX)
+-- Yaw = PID | Pitch = Lift + Hardware Damping Chain
 --========================================================--
 
 -------------------------
@@ -17,7 +17,8 @@ local KP, KI, KD = 1.3, 0.015, 0.55
 local INTEGRAL_LIMIT = 50
 local OUTPUT_LIMIT = 15
 
--- PITCH MODEL (your working system)
+-- HARDWARE BEHAVIOR TUNING
+local FINAL_DEADZONE = 1.0
 local PITCH_DEADZONE = 1.5
 local PITCH_SLOWZONE = 8
 
@@ -104,33 +105,37 @@ local function yawPID(err, dt)
 end
 
 -------------------------
--- PITCH CONTROL (FINAL STABLE MODEL)
+-- PITCH (lift + damping chain compatible)
 -------------------------
 local function pitchControl(err)
 
     local absErr = math.abs(err)
 
-    -- 🔼 LIFT CONTROL (only real motion direction)
-    if err > PITCH_DEADZONE then
+    if absErr < PITCH_DEADZONE then
+        -- FULL NEUTRAL → let redstone chain decay naturally
+        redstone.setOutput("top", false)
+        redstone.setAnalogOutput("right", 0)
+        return true
+    end
+
+    -- lift only
+    if err > 0 then
         redstone.setOutput("top", true)
     else
         redstone.setOutput("top", false)
     end
 
-    -- 🔥 SOFT BRAKE MODEL (your working fix)
+    -- soft braking into your chain
     local brake = 0
-
     if absErr < PITCH_SLOWZONE then
-        -- smooth decay into stop
         brake = (1 - (absErr / PITCH_SLOWZONE)) * 15
     else
         brake = 15
     end
 
-    brake = clamp(brake, 0, 15)
-    redstone.setAnalogOutput("right", brake)
+    redstone.setAnalogOutput("right", clamp(brake, 0, 15))
 
-    return absErr < PITCH_DEADZONE
+    return false
 end
 
 -------------------------
@@ -154,19 +159,28 @@ local function control()
             local yawErr = angleError(desiredYaw, yaw)
             local pitchErr = desiredPitch - pitch
 
-            -- YAW (PID)
-            local yawOut = yawPID(yawErr, dt)
+            -- =========================
+            -- YAW (PID + deadzone gate)
+            -- =========================
+            if math.abs(yawErr) < FINAL_DEADZONE then
+                redstone.setOutput("bottom", false)
+                redstone.setAnalogOutput("left", 0)
+            else
+                local yawOut = yawPID(yawErr, dt)
 
-            local yawDir = yawOut > 0
-            local yawPower = math.max(3, math.abs(yawOut))
+                local yawDir = yawOut > 0
+                local yawPower = math.max(3, math.abs(yawOut))
 
-            redstone.setOutput("bottom", yawDir)
-            redstone.setAnalogOutput("left", yawPower)
+                redstone.setOutput("bottom", yawDir)
+                redstone.setAnalogOutput("left", yawPower)
+            end
 
-            -- PITCH (lift + brake)
+            -- =========================
+            -- PITCH (lift + damping chain)
+            -- =========================
             local pitchOK = pitchControl(pitchErr)
 
-            -- FIRE CONDITION (stable aim)
+            -- FIRE CONDITION
             if math.abs(yawErr) < 2 and pitchOK then
                 cannon.fire()
             end
@@ -175,13 +189,13 @@ local function control()
             term.setCursorPos(1,1)
             term.clear()
 
-            print("CBC TURRET v6.0 (STABLE)")
-            print("------------------------")
+            print("CBC TURRET v6.1 (DAMPING FIX)")
+            print("-----------------------------")
             print("Yaw Err  :", yawErr)
             print("Pitch Err:", pitchErr)
             print("")
-            print("Yaw Out  :", yawOut)
-            print("Pitch OK :", pitchOK)
+            print("Yaw Deadzone Active :", math.abs(yawErr) < FINAL_DEADZONE)
+            print("Pitch OK           :", pitchOK)
 
         else
             redstone.setOutput("bottom", false)
