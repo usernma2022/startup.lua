@@ -137,28 +137,14 @@ end
 -------------------------
 -- PITCH CONTROL (FIXED STALL + LIMIT RECOVERY)
 -------------------------
-local function controlPitch(err, currentPitch)
+while true do
+    redstone.setOutput("top", true)
+    redstone.setAnalogOutput("right", 0)
+    sleep(1)
 
-    -- clamp target motion window
-    if currentPitch > PITCH_MAX and err > 0 then
-        err = -1
-    elseif currentPitch < PITCH_MIN and err < 0 then
-        err = 1
-    end
-
-    local absErr = math.abs(err)
-
-    redstone.setOutput(PITCH_DIR, err > 0)
-
-    local brake = 0
-    if absErr < SOFT_ZONE then
-        brake = (1 - absErr / SOFT_ZONE) * 10
-    end
-
-    brake = clamp(brake, 0, 15)
-    redstone.setAnalogOutput(PITCH_BRAKE, brake)
-
-    return absErr <= DEAD_ZONE
+    redstone.setOutput("top", false)
+    redstone.setAnalogOutput("right", 0)
+    sleep(1)
 end
 
 -------------------------
