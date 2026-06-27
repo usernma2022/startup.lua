@@ -1,11 +1,9 @@
 while true do
+    print("UP ONLY")
     redstone.setOutput("top", true)
-    redstone.setAnalogOutput("right", 15)
+    sleep(2)
 
-    sleep(0.2)
-
+    print("DOWN ONLY")
     redstone.setOutput("top", false)
-    redstone.setAnalogOutput("right", 0)
-
-    sleep(0.2)
+    sleep(2)
 end
