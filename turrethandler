@@ -1,5 +1,5 @@
 --========================================================--
--- CBC AWACS TURRET CONTROLLER v4.0 (FULL DEBUG BUILD)
+-- CBC AWACS TURRET CONTROLLER v4.1 (PITCH FIXED MODEL)
 --========================================================--
 
 -------------------------
@@ -36,10 +36,8 @@ local target = nil
 local lastPacket = 0
 
 local desiredYaw = 0
-local desiredPitch = 0
 
 local lastFire = 0
-
 local lastDebug = 0
 
 local debugState = {
@@ -79,20 +77,6 @@ local function angleError(a, b)
     return e
 end
 
-local function calcAngles(t)
-    local cx, cy, cz = cannon.getX(), cannon.getY(), cannon.getZ()
-
-    local dx = t.x - cx
-    local dy = t.y - cy
-    local dz = t.z - cz
-
-    local yaw = math.deg(math.atan2(dz, dx)) + YAW_OFFSET
-    local horiz = math.sqrt(dx*dx + dz*dz)
-    local pitch = math.deg(math.atan2(dy, horiz))
-
-    return yaw, pitch
-end
-
 local function hasTarget()
     return target ~= nil and (os.clock() - lastPacket) < TARGET_TIMEOUT
 end
@@ -105,29 +89,49 @@ local function receiver()
         local _, _, ch, _, msg = os.pullEvent("modem_message")
 
         if ch == CHANNEL and type(msg) == "table" and msg.type == "PLANE" then
-            target = { x = msg.x, y = msg.y, z = msg.z }
+            target = {
+                x = msg.x,
+                y = msg.y,
+                z = msg.z
+            }
             lastPacket = os.clock()
         end
     end
 end
 
 -------------------------
--- AIM UPDATE
+-- AIM CALC (YAW ONLY REAL ANGLE)
 -------------------------
-local function updateAim()
-    if not hasTarget() then return end
-    desiredYaw, desiredPitch = calcAngles(target)
+local function calcYaw(t)
+    local cx, cy, cz = cannon.getX(), cannon.getY(), cannon.getZ()
+
+    local dx = t.x - cx
+    local dz = t.z - cz
+
+    return math.deg(math.atan2(dz, dx)) + YAW_OFFSET
 end
 
 -------------------------
--- YAW CONTROL
+-- PITCH MODEL (FIXED: RELATIVE HEIGHT CONTROL)
+-------------------------
+local function calcPitchControl(t)
+    local cy = cannon.getY()
+
+    local dy = t.y - cy
+
+    -- THIS is the key fix:
+    -- treat pitch as vertical displacement control, not angle math
+    return dy
+end
+
+-------------------------
+-- YAW CONTROL (UNCHANGED BUT STABLE)
 -------------------------
 local function controlYaw(err)
 
     local absErr = math.abs(err)
 
     debugState.yawDir = (err > 0)
-
     redstone.setOutput(YAW_DIR, debugState.yawDir)
 
     local brake = 0
@@ -143,30 +147,32 @@ local function controlYaw(err)
 end
 
 -------------------------
--- PITCH CONTROL
+-- PITCH CONTROL (FIXED MODEL)
 -------------------------
-local function controlPitch(err)
+local function controlPitch(dy)
 
-    local absErr = math.abs(err)
+    local absDy = math.abs(dy)
 
-    debugState.pitchDir = (err > 0)
+    -- direction = purely up/down based on height difference
+    local goUp = dy > 0
 
-    redstone.setOutput(PITCH_DIR, debugState.pitchDir)
+    debugState.pitchDir = goUp
+    redstone.setOutput(PITCH_DIR, goUp)
 
     local brake = 0
-    if absErr < SOFT_ZONE then
-        brake = (1 - (absErr / SOFT_ZONE)) * 10
+    if absDy < SOFT_ZONE then
+        brake = (1 - (absDy / SOFT_ZONE)) * 10
     end
 
     brake = clamp(brake, 0, 15)
     debugState.pitchBrake = brake
     redstone.setAnalogOutput(PITCH_BRAKE, brake)
 
-    return absErr <= DEAD_ZONE
+    return absDy <= DEAD_ZONE
 end
 
 -------------------------
--- FIRE CONTROL
+-- FIRE
 -------------------------
 local function fire(yawOK, pitchOK)
     if yawOK and pitchOK then
@@ -178,7 +184,7 @@ local function fire(yawOK, pitchOK)
 end
 
 -------------------------
--- DEBUG DISPLAY
+-- DEBUG
 -------------------------
 local function drawDebug()
 
@@ -189,28 +195,28 @@ local function drawDebug()
     term.setCursorPos(1,1)
     term.clear()
 
-    print("=== CBC TURRET v4 DEBUG ===")
+    print("=== CBC TURRET v4.1 (PITCH FIX) ===")
     print("Target:", hasTarget() and "YES" or "NO")
 
-    print("")
-    print(string.format("Desired Yaw:   %.2f", desiredYaw))
-    print(string.format("Desired Pitch: %.2f", desiredPitch))
+    if hasTarget() then
+        print(string.format("Target Y: %.2f", target.y))
+    end
 
     print("")
     print(string.format("Yaw Err:   %.2f", debugState.yawErr))
-    print(string.format("Pitch Err: %.2f", debugState.pitchErr))
+    print(string.format("Pitch Dy:  %.2f", debugState.pitchErr))
 
     print("")
-    print("Yaw Dir:  ", debugState.yawDir and "RIGHT" or "LEFT")
-    print("Pitch Dir:", debugState.pitchDir and "UP/DOWN")
+    print("Yaw Dir:   ", debugState.yawDir and "RIGHT" or "LEFT")
+    print("Pitch Dir: ", debugState.pitchDir and "UP")
 
     print("")
     print(string.format("Yaw Brake:   %.2f", debugState.yawBrake))
     print(string.format("Pitch Brake: %.2f", debugState.pitchBrake))
 
     print("")
-    print(string.format("Cannon Yaw:   %.2f", cannon.getYaw()))
-    print(string.format("Cannon Pitch: %.2f", cannon.getPitch()))
+    print(string.format("Yaw:   %.2f", cannon.getYaw()))
+    print(string.format("Pitch: %.2f", cannon.getPitch()))
 end
 
 -------------------------
@@ -222,19 +228,18 @@ local function control()
 
         if hasTarget() then
 
-            updateAim()
-
             local yaw = norm(cannon.getYaw())
-            local pitch = cannon.getPitch()
 
+            local desiredYaw = calcYaw(target)
             local yawErr = angleError(desiredYaw, yaw)
-            local pitchErr = desiredPitch - pitch
+
+            local pitchDy = calcPitchControl(target)
 
             debugState.yawErr = yawErr
-            debugState.pitchErr = pitchErr
+            debugState.pitchErr = pitchDy
 
             local yawOK = controlYaw(yawErr)
-            local pitchOK = controlPitch(pitchErr)
+            local pitchOK = controlPitch(pitchDy)
 
             fire(yawOK, pitchOK)
 
