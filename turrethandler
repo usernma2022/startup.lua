@@ -1,5 +1,5 @@
 --========================================================--
--- CBC AWACS TURRET CONTROLLER v5 (PID STABLE)
+-- CBC AWACS TURRET CONTROLLER v5.1
 --========================================================--
 
 -------------------------
@@ -11,7 +11,7 @@ local TARGET_TIMEOUT = 5
 
 local YAW_OFFSET = 90
 
--- PID tuning (you WILL tweak these slightly)
+-- PID tuning
 local KP = 1.4
 local KI = 0.02
 local KD = 0.6
@@ -20,6 +20,9 @@ local INTEGRAL_LIMIT = 50
 local OUTPUT_LIMIT = 15
 
 local DEAD_ZONE = 1.2
+
+-- 🔧 IMPORTANT FIX: your discovered neutral offset (~ -45°)
+local PITCH_OFFSET = 45
 
 -------------------------
 -- PERIPHERALS
@@ -40,11 +43,9 @@ local lastPacket = 0
 
 local lastTime = os.clock()
 
--- PID state
 local yawI, yawPrev = 0, 0
 local pitchI, pitchPrev = 0, 0
 
--- redstone state cache
 local lastYawDir = nil
 local lastPitchDir = nil
 local lastYawBrake = -1
@@ -84,7 +85,7 @@ local function calcAngles(t)
 end
 
 -------------------------
--- INPUT
+-- TARGET INPUT
 -------------------------
 local function receiver()
     while true do
@@ -98,7 +99,7 @@ local function receiver()
 end
 
 -------------------------
--- PID CORE
+-- PID
 -------------------------
 local function pid(err, dt, i, prev)
 
@@ -114,7 +115,7 @@ local function pid(err, dt, i, prev)
 end
 
 -------------------------
--- REDSTONE APPLY (STATEFUL)
+-- REDSTONE APPLY (stateful)
 -------------------------
 local function setAxis(dirSide, brakeSide, dir, power, lastDir, lastBrake)
 
@@ -132,7 +133,7 @@ local function setAxis(dirSide, brakeSide, dir, power, lastDir, lastBrake)
 end
 
 -------------------------
--- CONTROL LOOP
+-- CONTROL
 -------------------------
 local function control()
 
@@ -147,45 +148,46 @@ local function control()
             local desiredYaw, desiredPitch = calcAngles(target)
 
             local yaw = norm(cannon.getYaw())
-            local pitch = cannon.getPitch()
+
+            -- 🔧 FIX: calibrated pitch space
+            local rawPitch = cannon.getPitch()
+            local pitch = rawPitch + PITCH_OFFSET
 
             local yawErr = angleError(desiredYaw, yaw)
             local pitchErr = desiredPitch - pitch
 
-            -- PID
             local yawOut
             yawOut, yawI, yawPrev = pid(yawErr, dt, yawI, yawPrev)
 
             local pitchOut
             pitchOut, pitchI, pitchPrev = pid(pitchErr, dt, pitchI, pitchPrev)
 
-            -- direction conversion
             local yawDir = yawOut > 0
             local pitchDir = pitchOut > 0
 
             local yawPower = math.abs(yawOut)
             local pitchPower = math.abs(pitchOut)
 
-            -- deadzone stop
             if math.abs(yawErr) < DEAD_ZONE then yawPower = 10 end
             if math.abs(pitchErr) < DEAD_ZONE then pitchPower = 10 end
 
-            -- apply
             lastYawDir, lastYawBrake =
                 setAxis("bottom", "left", yawDir, yawPower, lastYawDir, lastYawBrake)
 
             lastPitchDir, lastPitchBrake =
                 setAxis("top", "right", pitchDir, pitchPower, lastPitchDir, lastPitchBrake)
 
-            -- debug
             term.setCursorPos(1,1)
             term.clear()
 
-            print("CBC TURRET v5 PID")
-            print("-----------------")
+            print("CBC TURRET v5.1 (CALIBRATED)")
+            print("-----------------------------")
             print("Yaw Err  :", yawErr)
             print("Pitch Err:", pitchErr)
-            print()
+            print("")
+            print("Pitch Raw:", rawPitch)
+            print("Pitch Adj:", pitch)
+            print("")
             print("Yaw Out  :", yawOut)
             print("Pitch Out:", pitchOut)
 
