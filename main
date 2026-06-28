@@ -16,6 +16,7 @@ local function setupBoard()
     monitor.setTextColor(colors.yellow)
     monitor.write("-------| COMMAND STATUS |---------------| COMBAT READINESS |--------------| PROTOCOLS ACTIVE |------")
     local width, height = monitor.getSize()
+    fix(1, 2)
     for i = 1, 2 do
         local pillarX = math.floor(width / 3) * i
         for y = 1, height do
@@ -25,3 +26,13 @@ local function setupBoard()
     end
 end
 
+local function commandStatus()
+    fix(12, 4)
+    monitor.setTextColor(colors.white)
+    print("Defcon:")
+end
+
+while true do
+    setupBoard()
+    sleep(updateTime)
+end
