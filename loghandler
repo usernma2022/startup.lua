@@ -1,0 +1,65 @@
+-- Secondary Computer that stores logs from radarhandler and makes it visibly easier to read.
+local monitor = peripheral.find("monitor")
+local modem = peripheral.find("modem")
+local override = false
+local channel = 1
+local defaultx = 2
+local defaulty = 4
+local radarcd = 1 -- cd of radar affects
+monitor.setTextScale(0.5)
+
+local function monitorDeco()
+    monitor.setCursorPos(1, 1)
+    monitor.write("----------------------V.1.2 Logs-------------------------------")
+    monitor.setCursorPos(1, 2)
+    monitor.write("                       Output Logs:")
+    local w, h = monitor.getSize()
+    local x = 29
+    for y = 3, h do
+        monitor.setCursorPos(x, y)
+        monitor.write("|")
+    end
+end
+
+local function monitorY()
+    if defaulty > 34 then
+        if defaultx == 34 then 
+            defaultx = 2
+            defaulty = 4
+            monitorDeco()
+            monitor.setCursorPos(2, 4)
+        else
+            defaultx = 34
+            defaulty = 4
+            monitorDeco()
+            monitor.setCursorPos(defaultx, defaulty)
+        end
+    else
+        defaulty = defaulty + 1
+        monitorDeco()
+        monitor.setCursorPos(defaultx, defaulty)
+    end
+end
+
+monitor.clear()
+modem.open(channel)
+
+while true do
+    if override then
+        monitor.setCursorPos(2, 2)
+    end
+    monitorY()
+    local _, _, channel, reply, packet = os.pullEvent("modem_message")
+    
+    monitor.write(packet.time.hour .. ":" .. packet.time.min .. ":" .. packet.time.sec .. " | " .. packet.type .. "   ")
+    print("Y: " .. defaulty)
+    print("X: " .. defaultx)
+    local radarcdc = radarcd + packet.cooldown
+    monitorY()
+    monitor.write("    Players: " .. packet.stats.players)
+    monitorY()
+    monitor.write("    Defcon: " .. packet.defcon .. "   ")
+    monitorY()
+    sleep(radarcd)
+end
+    
