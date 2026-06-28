@@ -1,0 +1,27 @@
+local monitor = peripheral.find("monitor")
+local modem = peripheral.find("modem")
+local channel = 1
+local updateTime = 1
+
+local function fix(xv, yv)
+    monitor.setTextColor(colors.white)
+    monitor.setTextScale(0.75)
+    monitor.setCursorPos(xv, yv)
+end
+
+local function setupBoard()
+    fix(1, 1)
+    monitor.write("-------------------------------------------------------------------------------------------------------------------------------------------------------")
+    monitor.setCursorPos(1, 2)
+    monitor.setTextColor(colors.yellow)
+    monitor.write("-------| COMMAND STATUS |---------------| COMBAT READINESS |--------------| PROTOCOLS ACTIVE |------")
+    local width, height = monitor.getSize()
+    for i = 1, 2 do
+        local pillarX = math.floor(width / 3) * i
+        for y = 1, height do
+            monitor.setCursorPos(pillarX, y)
+            monitor.write("|")
+        end
+    end
+end
+
