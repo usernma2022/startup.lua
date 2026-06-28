@@ -1,0 +1,400 @@
+local function warn(msg)
+    print("[AWACS WARNING] "..msg)
+end
+
+local c = peripheral.find("chatBox")
+if not c then
+    warn("ChatBox missing - alerts disabled")
+end
+
+local d = peripheral.find("player_detector") or peripheral.find("playerDetector")
+if not d then
+    warn("Player Detector missing - radar disabled")
+end
+
+local modem = peripheral.find("modem")
+if not modem then
+    warn("Modem missing - network disabled")
+else
+    modem.open(1)
+end
+
+local m = peripheral.find("monitor")
+if not m then
+    warn("Monitor missing - no displayed info")
+    m = term
+end
+
+local w,h = m.getSize()
+
+local lastSend = 0
+local sendRate = 0.5
+
+-- CONFIG
+local file="awacs_cfg"
+
+local function save(cfg)
+if fs then
+local f=fs.open(file,"w")
+f.write(textutils.serialize(cfg))
+f.close()
+end
+end
+
+local function load()
+if fs and fs.exists(file) then
+local f=fs.open(file,"r")
+local data=textutils.unserialize(f.readAll())
+f.close()
+return data
+end
+return nil
+end
+
+local cfg=load() or {
+x=0,y=0,z=0,
+range=1000,
+update=1,
+host="Usernam_",
+cooldown=10,
+chatBroadcast=true
+}
+
+-- BOOT MENU
+m.clear()
+m.setCursorPos(1,1)
+print("=== AWACS BOOT ===")
+print("[1] Default")
+print("[2] Manual")
+print("[3] Saved")
+
+local choice=read()
+
+if choice=="2" then
+print("Base X:") cfg.x=tonumber(read()) or 0
+print("Base Y:") cfg.y=tonumber(read()) or 0
+print("Base Z:") cfg.z=tonumber(read()) or 0
+print("Range:") cfg.range=tonumber(read()) or 1000
+print("Update:") cfg.update=tonumber(read()) or 1
+print("Host:") cfg.host=read()
+print("Cooldown:") cfg.cooldown=tonumber(read()) or 10
+print("Chat Broadcast (true/false):")
+local cb = read()
+if cb ~= "" then
+cfg.chatBroadcast = (cb == "true")
+end
+
+elseif choice=="3" then
+cfg=load() or cfg
+end
+
+save(cfg)
+
+-- SYSTEM STATE
+local pos={x=cfg.x,y=cfg.y,z=cfg.z}
+local r=cfg.range
+local t = tonumber(cfg.update) or 1
+local host=cfg.host
+local cooldown=cfg.cooldown
+
+local memory={}
+local seenTime={}
+local alerted={}
+
+local lastAlertTime=0
+
+-- HUD
+local blink=false
+local blinkTimer=0
+
+-- DIST
+local function dist(a,b)
+return ((a.x-b.x)^2+(a.z-b.z)^2)^0.5
+end
+
+-- VECTOR INCOMING (ignore host)
+local function incoming(n,p)
+if n==host then return false end
+
+local o=memory[n]
+if not o then return false end
+
+-- Movement vector
+local vx=o.x-o.px
+local vz=o.z-o.pz
+
+-- Vector toward base
+local dx=pos.x-o.x
+local dz=pos.z-o.z
+
+local vlen=math.sqrt(vx*vx+vz*vz)
+local dlen=math.sqrt(dx*dx+dz*dz)
+
+if vlen==0 or dlen==0 then
+return false
+end
+
+vx,vz=vx/vlen,vz/vlen
+dx,dz=dx/dlen,dz/dlen
+
+return (vx*dx+vz*dz)>0.2
+end
+
+-- CHAT ALERT
+local function alert(name,p)
+if not c or not cfg.chatBroadcast then return end
+
+local now=os.clock()
+if now-lastAlertTime<cooldown then return end
+lastAlertTime=now
+
+local tag = (p and p.speed or 0) >= 20 and "PLANE" or "PLAYER"
+
+if c and cfg.chatBroadcast then
+c.sendMessage(
+"[AWACS ALERT] "..tag.." DETECTED: "..name..
+" | INBOUND VECTOR THREAT | Leave immediately."
+)
+end
+end
+
+-- GRID
+local function grid()
+local cx=math.floor(w/2)
+local cy=math.floor(h/2)
+
+for x=1,w do
+m.setCursorPos(x,cy)
+m.write("-")
+end
+
+for y=2,h do
+m.setCursorPos(cx,y)
+m.write("|")
+end
+end
+
+-- SCREEN MAP
+local function toScreen(x,z)
+local cx=math.floor(w/2)
+local cy=math.floor(h/2)
+return cx+(x/r)*(w/2),cy+(z/r)*(h/2)
+end
+
+local function label(n,p)
+    if n==host then return "HOST" end
+
+    local s = p.speed or 0
+
+    if s >= 35 then
+        return "PLANE"
+    end
+
+    return "PLAYER"
+end
+
+local function color(n,p)
+
+if n==host then
+    return colors.green
+end
+
+local s = p.speed or 0
+local inbound = incoming(n,p)
+
+-- PLANE CLASSIFICATION (ONLY HIGH SPEED)
+if s >= 35 then
+    return colors.red
+end
+
+-- STATIC
+if s < 0.4 then
+    return colors.white
+end
+
+-- INBOUND THREAT
+if inbound then
+    if s > 6 then
+        return colors.orange
+    else
+        return colors.yellow
+    end
+end
+
+-- NORMAL MOVEMENT
+return colors.lightBlue
+
+end
+
+local function sendPlaneData(n, v)
+
+    if not modem then return end
+    if n == host then return end
+    if (v.speed or 0) < 20 then return end
+
+    if os.clock() - lastSend < sendRate then return end
+    lastSend = os.clock()
+
+    local packet = {
+        id = n,
+        x = v.x,
+        y = v.y,
+        z = v.z,
+        speed = v.speed,
+        type = "PLANE",
+        threat = "HIGH",
+        mode = "AUTO",
+        time = os.clock()
+    }
+
+    modem.transmit(1, 1, packet)
+end
+
+-- MAIN LOOP
+while true do
+
+-- BLINK
+blinkTimer=blinkTimer+1
+if blinkTimer>=1 then
+blink=not blink
+blinkTimer=0
+end
+
+-- =========================
+-- RADAR SCAN (RANGE FIXED)
+-- =========================
+if d then
+for _,n in ipairs(d.getOnlinePlayers()) do
+local p=d.getPlayer(n)
+if p then
+
+local dx=p.x-pos.x
+local dz=p.z-pos.z
+local distSq=dx*dx+dz*dz
+
+-- HARD RANGE FILTER
+if distSq <= r*r then
+local old=memory[n]
+
+memory[n]={
+x=p.x,
+y=p.y,
+z=p.z,
+
+px=old and old.x or p.x,
+py=old and old.y or p.y,
+pz=old and old.z or p.z,
+
+speed=0
+}
+
+local dx=memory[n].x-memory[n].px
+local dy=memory[n].y-memory[n].py
+local dz=memory[n].z-memory[n].pz
+
+memory[n].speed=math.sqrt(dx*dx+dy*dy+dz*dz)/t
+seenTime[n]=os.clock()
+end
+
+end
+end
+
+-- REMOVE STALE TARGETS
+for n,t in pairs(seenTime)do
+if os.clock()-t > 3 then
+memory[n]=nil
+seenTime[n]=nil
+alerted[n]=nil
+end
+end
+
+-- BUILD CONTACTS
+local contacts={}
+for n,p in pairs(memory)do
+contacts[n]=p
+end
+
+local playerCount = 0
+for n, _ in pairs(contacts or {}) do
+    if n ~= host then
+        playerCount = playerCount + 1
+    end
+end
+
+if type(playerCount) ~= "number" then
+playerCount = 0
+end
+
+-- DEFCON
+local defcon,defconColor
+if playerCount==0 then
+defcon="GREEN"
+defconColor=colors.green
+elseif playerCount<5 then
+defcon="YELLOW"
+defconColor=colors.yellow
+else
+defcon="RED"
+defconColor=colors.red
+end
+
+-- DRAW
+m.clear()
+
+-- HEADER
+m.setCursorPos(1,1)
+
+local online=blink and "ONLINE" or "      "
+
+m.setTextColor(colors.white)
+m.write("AWACS v1.2 [")
+
+m.setTextColor(colors.yellow)
+m.write(online)
+
+m.setTextColor(colors.white)
+m.write("] | DEFCON: ")
+
+m.setTextColor(defconColor)
+m.write(defcon)
+
+m.setTextColor(colors.white)
+m.write(" | P:"..playerCount.." | Host:"..host)
+
+-- GRID
+grid()
+
+-- RADAR
+local cy=math.floor(h/2)
+
+for n,v in pairs(contacts)do
+
+sendPlaneData(n,v)
+local x,z=v.x-pos.x,v.z-pos.z
+local sx,sy=toScreen(x,z)
+
+if sx>0 and sx<w and sy>1 and sy<h then
+m.setCursorPos(sx,sy)
+
+m.setTextColor(color(n,v))
+
+if label(n,v)=="PLANE" then
+    m.write("A")
+else
+    m.write("o")
+end
+end
+
+-- ALERT
+if n~=host and incoming(n,v) and (v.speed or 0)>6 then
+if not alerted[n] then
+alert(n,v)
+alerted[n]=true
+end
+end
+
+end
+
+sleep(t)
+end
+end
