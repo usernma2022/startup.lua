@@ -198,6 +198,7 @@ local function sendHQPacket(contacts, defcon, playerCount)
 
         defcon = defcon,
         host = host,
+        cooldown = cfg.cooldown,
 
         radar = {
             range = r,
