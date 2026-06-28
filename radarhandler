@@ -27,9 +27,6 @@ end
 
 local w,h = m.getSize()
 
--- =========================
--- CONFIG
--- =========================
 local file = "awacs_cfg"
 
 local function save(cfg)
@@ -59,9 +56,6 @@ local cfg = load() or {
     chatBroadcast = true
 }
 
--- =========================
--- BOOT MENU
--- =========================
 m.clear()
 m.setCursorPos(1,1)
 print("=== AWACS HQ NODE BOOT ===")
@@ -88,9 +82,6 @@ end
 
 save(cfg)
 
--- =========================
--- SYSTEM STATE
--- =========================
 local pos = {x = cfg.x, y = cfg.y, z = cfg.z}
 local r = cfg.range
 local t = cfg.update
@@ -105,9 +96,6 @@ local lastAlertTime = 0
 local lastSend = 0
 local sendRate = 0.5
 
--- =========================
--- UTIL
--- =========================
 local function distSq(a,b)
     return (a.x-b.x)^2 + (a.z-b.z)^2
 end
@@ -135,9 +123,6 @@ local function incoming(n,p)
     return (vx*dx + vz*dz) > 0.2
 end
 
--- =========================
--- CHAT ALERT
--- =========================
 local function alert(name,p)
     if not c or not cfg.chatBroadcast then return end
 
@@ -154,9 +139,6 @@ local function alert(name,p)
     )
 end
 
--- =========================
--- GRID
--- =========================
 local function grid()
     local cx = math.floor(w/2)
     local cy = math.floor(h/2)
@@ -178,9 +160,6 @@ local function toScreen(x,z)
     return cx + (x/r)*(w/2), cy + (z/r)*(h/2)
 end
 
--- =========================
--- CLASSIFICATION
--- =========================
 local function classify(v)
     local s = v.speed or 0
 
@@ -207,9 +186,6 @@ local function color(v)
     return colors.lightBlue
 end
 
--- =========================
--- HQ PACKET SENDER (NEW CORE)
--- =========================
 local function sendHQPacket(contacts, defcon, playerCount)
 
     if not modem then return end
@@ -217,8 +193,8 @@ local function sendHQPacket(contacts, defcon, playerCount)
     lastSend = os.clock()
 
     local packet = {
-        type = "HQ_REPORT",
-        time = os.clock(),
+        type = "RADAR_REPORT",
+        time = os.date("*t"),
 
         defcon = defcon,
         host = host,
@@ -239,9 +215,6 @@ local function sendHQPacket(contacts, defcon, playerCount)
     modem.transmit(1, 1, packet)
 end
 
--- =========================
--- MAIN LOOP
--- =========================
 while true do
 
     -- SCAN
@@ -319,8 +292,7 @@ while true do
         defconColor = colors.red
     end
 
-    -- SEND TO HQ (CORE CHANGE)
-    sendHQPacket(contacts, defcon, playerCount)
+    sendHQPacket(contacts, defcon, playerCount, type, time, range)
 
     -- DISPLAY
     m.clear()
