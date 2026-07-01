@@ -2,52 +2,19 @@ local function warn(msg)
     print("[AWACS WARNING] " .. msg)
 end
 
-local c = peripheral.find("chatBox")
-if not c then
-    warn("ChatBox missing - alerts disabled")
-end
-
-local d = peripheral.find("player_detector") or peripheral.find("playerDetector")
-if not d then
-    warn("Player Detector missing - radar disabled")
-end
-
+-- peripherals
+local chat = peripheral.find("chatBox")
+local detector = peripheral.find("player_detector") or peripheral.find("playerDetector")
 local modem = peripheral.find("modem")
-if not modem then
-    warn("Modem missing - network disabled")
-else
-    modem.open(1)
-end
+local monitor = peripheral.find("monitor") or term
 
-local m = peripheral.find("monitor")
-if not m then
-    warn("Monitor missing - no displayed info")
-    m = term
-end
+if not detector then warn("Player Detector missing - radar disabled") end
+if not modem then warn("Modem missing - network disabled") else modem.open(1) end
+if not chat then warn("ChatBox missing - alerts disabled") end
 
-local w,h = m.getSize()
+local w, h = monitor.getSize()
 
-local file = "awacs_cfg"
-
-local function save(cfg)
-    if fs then
-        local f = fs.open(file, "w")
-        f.write(textutils.serialize(cfg))
-        f.close()
-    end
-end
-
-local function load()
-    if fs and fs.exists(file) then
-        local f = fs.open(file, "r")
-        local data = textutils.unserialize(f.readAll())
-        f.close()
-        return data
-    end
-    return nil
-end
-
-local cfg = load() or {
+local cfg = {
     x = 0, y = 0, z = 0,
     range = 1000,
     update = 1,
@@ -56,229 +23,197 @@ local cfg = load() or {
     chatBroadcast = true
 }
 
-m.clear()
-m.setCursorPos(1,1)
-print("=== AWACS HQ NODE BOOT ===")
-print("[1] Default")
-print("[2] Manual")
-print("[3] Saved")
-
-local choice = read()
-
-if choice == "2" then
-    print("Base X:") cfg.x = tonumber(read()) or 0
-    print("Base Y:") cfg.y = tonumber(read()) or 0
-    print("Base Z:") cfg.z = tonumber(read()) or 0
-    print("Range:") cfg.range = tonumber(read()) or 1000
-    print("Update:") cfg.update = tonumber(read()) or 1
-    print("Host:") cfg.host = read()
-    print("Cooldown:") cfg.cooldown = tonumber(read()) or 10
-    print("Chat Broadcast (true/false):")
-    cfg.chatBroadcast = (read() == "true")
-
-elseif choice == "3" then
-    cfg = load() or cfg
-end
-
-save(cfg)
-
-local pos = {x = cfg.x, y = cfg.y, z = cfg.z}
-local r = cfg.range
-local t = cfg.update
-local host = cfg.host
-local cooldown = cfg.cooldown
-
 local memory = {}
-local seenTime = {}
+local lastSeen = {}
 local alerted = {}
 
-local lastAlertTime = 0
 local lastSend = 0
 local sendRate = 0.5
+local lastAlert = 0
 
-local function distSq(a,b)
-    return (a.x-b.x)^2 + (a.z-b.z)^2
+local function classify(v)
+    local s = v.speed or 0
+    local y = v.y or 0
+
+    local highAltitude = y >= 80
+    local fast = s >= 25
+
+    if highAltitude and fast then
+        return "PLANE"
+    end
+
+    if highAltitude then
+        return "AIRBORNE"
+    end
+
+    if s >= 6 then
+        return "FAST"
+    end
+
+    if s < 0.4 then
+        return "STATIC"
+    end
+
+    return "PLAYER"
 end
 
-local function incoming(n,p)
-    if n == host then return false end
-
-    local o = memory[n]
+local function isIncoming(v)
+    local o = memory[v.id]
     if not o then return false end
 
     local vx = o.x - o.px
     local vz = o.z - o.pz
 
-    local dx = pos.x - o.x
-    local dz = pos.z - o.z
+    local dx = cfg.x - o.x
+    local dz = cfg.z - o.z
 
     local vlen = math.sqrt(vx*vx + vz*vz)
     local dlen = math.sqrt(dx*dx + dz*dz)
 
     if vlen == 0 or dlen == 0 then return false end
 
-    vx, vz = vx/vlen, vz/vlen
-    dx, dz = dx/dlen, dz/dlen
+    vx, vz = vx / vlen, vz / vlen
+    dx, dz = dx / dlen, dz / dlen
 
-    return (vx*dx + vz*dz) > 0.2
+    return (vx * dx + vz * dz) > 0.2
 end
 
-local function alert(name,p)
-    if not c or not cfg.chatBroadcast then return end
+local function scan()
+    if not detector then return end
+
+    for _, name in ipairs(detector.getOnlinePlayers()) do
+        local p = detector.getPlayer(name)
+
+        if p then
+            local dx = p.x - cfg.x
+            local dz = p.z - cfg.z
+
+            if dx*dx + dz*dz <= cfg.range*cfg.range then
+
+                local old = memory[name]
+
+                memory[name] = {
+                    id = name,
+                    x = p.x,
+                    y = p.y,
+                    z = p.z,
+
+                    px = old and old.x or p.x,
+                    py = old and old.y or p.y,
+                    pz = old and old.z or p.z,
+
+                    speed = 0
+                }
+
+                local dx2 = memory[name].x - memory[name].px
+                local dy2 = memory[name].y - memory[name].py
+                local dz2 = memory[name].z - memory[name].pz
+
+                memory[name].speed =
+                    math.sqrt(dx2*dx2 + dy2*dy2 + dz2*dz2) / cfg.update
+
+                lastSeen[name] = os.clock()
+            end
+        end
+    end
+end
+
+local function cleanup()
+    for n, t in pairs(lastSeen) do
+        if os.clock() - t > 3 then
+            memory[n] = nil
+            lastSeen[n] = nil
+            alerted[n] = nil
+        end
+    end
+end
+
+local function alert(name, v)
+    if not chat or not cfg.chatBroadcast then return end
 
     local now = os.clock()
-    if now - lastAlertTime < cooldown then return end
-    lastAlertTime = now
+    if now - lastAlert < cfg.cooldown then return end
+    lastAlert = now
 
-    local tag = (p.speed or 0) >= 35 and "PLANE" or "PLAYER"
+    local tag = (v.speed or 0) >= 25 and "AIR THREAT" or "CONTACT"
 
-    c.sendMessage(
-        "[AWACS ALERT] " .. tag ..
-        " DETECTED: " .. name ..
-        " | INBOUND VECTOR"
+    chat.sendMessage(
+        "[AWACS] " .. tag .. " DETECTED: " .. name
     )
 end
 
 local function grid()
-    local cx = math.floor(w/2)
-    local cy = math.floor(h/2)
+    local cx, cy = math.floor(w/2), math.floor(h/2)
 
-    for x=1,w do
-        m.setCursorPos(x,cy)
-        m.write("-")
+    for x = 1, w do
+        monitor.setCursorPos(x, cy)
+        monitor.write("-")
     end
 
-    for y=2,h do
-        m.setCursorPos(cx,y)
-        m.write("|")
+    for y = 2, h do
+        monitor.setCursorPos(cx, y)
+        monitor.write("|")
     end
 end
 
-local function toScreen(x,z)
-    local cx = math.floor(w/2)
-    local cy = math.floor(h/2)
-    return cx + (x/r)*(w/2), cy + (z/r)*(h/2)
+local function toScreen(x, z)
+    local cx, cy = math.floor(w/2), math.floor(h/2)
+    return cx + (x / cfg.range) * (w/2),
+           cy + (z / cfg.range) * (h/2)
 end
 
-local function classify(v)
-    local s = v.speed or 0
-
-    if s >= 35 then return "PLANE" end
-    if s >= 6 then return "FAST_MOVING" end
-    if s < 0.4 then return "STATIC" end
-    return "PLAYER"
-end
-
-local function color(v)
-    local s = v.speed or 0
-
-    if v.id == host then
-        return colors.green
-    end
-
-    if s >= 35 then return colors.red end
-    if s < 0.4 then return colors.white end
-    if incoming(v.id, v) then
-        if s > 6 then return colors.orange end
-        return colors.yellow
-    end
-
-    return colors.lightBlue
-end
-
-local function sendHQPacket(contacts, defcon, playerCount)
+local function sendPacket(contacts, defcon, playerCount)
 
     if not modem then return end
     if os.clock() - lastSend < sendRate then return end
     lastSend = os.clock()
 
     local packet = {
-        type = "RADAR_REPORT",
-        time = os.date("*t"),
+        system = "radar",
+        type = "update",
+        id = "radar_main",
+        timestamp = os.epoch("utc"),
 
-        defcon = defcon,
-        host = host,
-        cooldown = cfg.update,
+        data = {
+            defcon = defcon,
+            range = cfg.range,
 
-        radar = {
-            range = r,
-            position = pos
-        },
+            position = {
+                x = cfg.x,
+                y = cfg.y,
+                z = cfg.z
+            },
 
-        stats = {
-            players = playerCount,
-            contacts = #contacts
-        },
+            stats = {
+                players = playerCount,
+                contacts = #contacts
+            },
 
-        contacts = contacts
+            contacts = contacts
+        }
     }
 
-    modem.transmit(1, 1, packet)
+    modem.transmit(1, 1, textutils.serialize(packet))
 end
 
 while true do
 
-    -- SCAN
-    if d then
-        for _,n in ipairs(d.getOnlinePlayers()) do
-            local p = d.getPlayer(n)
+    scan()
+    cleanup()
 
-            if p then
-                local dx = p.x - pos.x
-                local dz = p.z - pos.z
-
-                if dx*dx + dz*dz <= r*r then
-
-                    local old = memory[n]
-
-                    memory[n] = {
-                        id = n,
-                        x = p.x,
-                        y = p.y,
-                        z = p.z,
-
-                        px = old and old.x or p.x,
-                        py = old and old.y or p.y,
-                        pz = old and old.z or p.z,
-
-                        speed = 0
-                    }
-
-                    local dx2 = memory[n].x - memory[n].px
-                    local dy2 = memory[n].y - memory[n].py
-                    local dz2 = memory[n].z - memory[n].pz
-
-                    memory[n].speed = math.sqrt(dx2*dx2 + dy2*dy2 + dz2*dz2) / t
-                    seenTime[n] = os.clock()
-                end
-            end
-        end
-    end
-
-    -- CLEANUP
-    for n,tv in pairs(seenTime) do
-        if os.clock() - tv > 3 then
-            memory[n] = nil
-            seenTime[n] = nil
-            alerted[n] = nil
-        end
-    end
-
-    -- BUILD CONTACTS
     local contacts = {}
     local playerCount = 0
 
-    for n,p in pairs(memory) do
-        p.id = n
+    for n, p in pairs(memory) do
         p.type = classify(p)
         table.insert(contacts, p)
 
-        if n ~= host then
+        if n ~= cfg.host then
             playerCount = playerCount + 1
         end
     end
 
-    -- DEFCON
+    -- DEFCON LOGIC
     local defcon
     local defconColor
 
@@ -293,39 +228,43 @@ while true do
         defconColor = colors.red
     end
 
-    sendHQPacket(contacts, defcon, playerCount, type, time, range)
+    sendPacket(contacts, defcon, playerCount)
 
+    ---------------------------------------------------
     -- DISPLAY
-    m.clear()
-    m.setCursorPos(1,1)
+    ---------------------------------------------------
 
-    m.setTextColor(colors.white)
-    m.write("AWACS HQ NODE | DEFCON: ")
+    monitor.clear()
+    monitor.setCursorPos(1,1)
 
-    m.setTextColor(defconColor)
-    m.write(defcon)
+    monitor.setTextColor(colors.white)
+    monitor.write("AWACS | DEFCON: ")
 
-    m.setTextColor(colors.white)
-    m.write(" | P:" .. playerCount)
+    monitor.setTextColor(defconColor)
+    monitor.write(defcon)
+
+    monitor.setTextColor(colors.white)
+    monitor.write(" | P:" .. playerCount)
 
     grid()
 
-    for _,v in pairs(memory) do
-        local x,z = v.x - pos.x, v.z - pos.z
-        local sx,sy = toScreen(x,z)
+    for _, v in pairs(memory) do
+        local x, z = v.x - cfg.x, v.z - cfg.z
+        local sx, sy = toScreen(x, z)
 
-        if sx>0 and sx<w and sy>1 and sy<h then
-            m.setCursorPos(sx,sy)
-            m.setTextColor(color(v))
+        if sx > 0 and sx < w and sy > 1 and sy < h then
+            monitor.setCursorPos(sx, sy)
 
-            if classify(v) == "PLANE" then
-                m.write("A")
+            if v.type == "PLANE" then
+                monitor.setTextColor(colors.red)
+                monitor.write("A")
             else
-                m.write("o")
+                monitor.setTextColor(colors.lightBlue)
+                monitor.write("o")
             end
         end
 
-        if v.id ~= host and incoming(v.id, v) and (v.speed or 0) > 6 then
+        if v.id ~= cfg.host and isIncoming(v) and (v.speed or 0) > 6 then
             if not alerted[v.id] then
                 alert(v.id, v)
                 alerted[v.id] = true
@@ -333,5 +272,5 @@ while true do
         end
     end
 
-    sleep(t)
+    sleep(cfg.update)
 end
