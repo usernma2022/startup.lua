@@ -1,5 +1,3 @@
--- tung 2.0
-
 local scanner = peripheral.find("geoScanner")
 
 if not scanner then
@@ -7,224 +5,121 @@ if not scanner then
     return
 end
 
-
-local ores = {
-    Diamond = {
-        ["minecraft:diamond_ore"] = true,
-        ["minecraft:deepslate_diamond_ore"] = true
+local oreOptions = {
+    {
+        name = "Diamond",
+        ores = {
+            "minecraft:diamond_ore",
+            "minecraft:deepslate_diamond_ore"
+        }
     },
-
-    Gold = {
-        ["minecraft:gold_ore"] = true,
-        ["minecraft:deepslate_gold_ore"] = true
+    {
+        name = "Gold",
+        ores = {
+            "minecraft:gold_ore",
+            "minecraft:deepslate_gold_ore"
+        }
     },
-
-    Iron = {
-        ["minecraft:iron_ore"] = true,
-        ["minecraft:deepslate_iron_ore"] = true
+    {
+        name = "Iron",
+        ores = {
+            "minecraft:iron_ore",
+            "minecraft:deepslate_iron_ore"
+        }
     }
 }
 
-
 print("=== ORE FINDER ===")
 print("")
-print("1 - Diamond")
-print("2 - Gold")
-print("3 - Iron")
+print("1. Diamond")
+print("2. Gold")
+print("3. Iron")
 print("")
 
-write("Choose: ")
-local choice = read()
+write("Choose ore: ")
+local choice = tonumber(read())
 
-
-local selectedOre
-local oreName
-
-
-if choice == "1" then
-    selectedOre = ores.Diamond
-    oreName = "Diamond"
-
-elseif choice == "2" then
-    selectedOre = ores.Gold
-    oreName = "Gold"
-
-elseif choice == "3" then
-    selectedOre = ores.Iron
-    oreName = "Iron"
-
-else
-    print("Invalid choice")
+if not choice or not oreOptions[choice] then
+    print("Invalid choice.")
     return
 end
 
-
-
-local target = nil
-
-
-
-local function getDistance(block)
-
-    return math.sqrt(
-        block.x^2 +
-        block.y^2 +
-        block.z^2
-    )
-
-end
-
-
-
-local function printDirection(block)
-
-    if block.x > 0 then
-        print(math.abs(block.x).." blocks East")
-    elseif block.x < 0 then
-        print(math.abs(block.x).." blocks West")
-    else
-        print("Same East/West")
-    end
-
-
-    if block.y > 0 then
-        print(block.y.." blocks Up")
-    elseif block.y < 0 then
-        print(math.abs(block.y).." blocks Down")
-    else
-        print("Same Height")
-    end
-
-
-    if block.z > 0 then
-        print(block.z.." blocks South")
-    elseif block.z < 0 then
-        print(math.abs(block.z).." blocks North")
-    else
-        print("Same North/South")
-    end
-
-end
-
-
-
-print("")
-print("Tracking "..oreName)
-
-
+local selected = oreOptions[choice]
 
 while true do
 
     local results = scanner.scan(16)
 
+    local closest = nil
+    local closestDistance = math.huge
 
+    for _, block in ipairs(results) do
 
-    -- Check if current target still exists
+        for _, oreName in ipairs(selected.ores) do
 
-    if target then
+            if block.name == oreName then
 
-        local stillThere = false
-
-
-        for _, block in ipairs(results) do
-
-            if block.name == target.name
-            and block.x == target.x
-            and block.y == target.y
-            and block.z == target.z then
-
-                stillThere = true
-                break
-
-            end
-
-        end
-
-
-        if not stillThere then
-
-            print("")
-            print("Target mined!")
-            print("Searching again...")
-
-            target = nil
-
-        end
-
-    end
-
-
-
-    -- Find closest ore
-
-    if target == nil then
-
-        local closest = nil
-        local closestDistance = math.huge
-
-
-        for _, block in ipairs(results) do
-
-            if selectedOre[block.name] then
-
-                local distance = getDistance(block)
-
+                local distance = math.sqrt(
+                    block.x^2 +
+                    block.y^2 +
+                    block.z^2
+                )
 
                 if distance < closestDistance then
-
                     closestDistance = distance
                     closest = block
-
                 end
 
+                break
             end
 
         end
 
-
-
-        if closest then
-
-            target = closest
-
-            print("")
-            print("LOCKED ON")
-            print(target.name)
-
-        end
-
     end
-
-
-
-    -- Display target
 
     term.clear()
     term.setCursorPos(1,1)
 
+    print("Tracking: "..selected.name)
+    print("")
 
-    if target then
+    if closest then
 
-        print("=== ORE LOCK ===")
-        print(target.name)
+        print("Closest Ore Found!")
         print("")
 
-        print(
-            string.format(
-                "Distance: %.1f blocks",
-                getDistance(target)
-            )
-        )
+        if closest.x > 0 then
+            print(closest.x.." blocks East")
+        elseif closest.x < 0 then
+            print(math.abs(closest.x).." blocks West")
+        else
+            print("Same East/West position")
+        end
+
+        if closest.y > 0 then
+            print(closest.y.." blocks Up")
+        elseif closest.y < 0 then
+            print(math.abs(closest.y).." blocks Down")
+        else
+            print("Same Height")
+        end
+
+        if closest.z > 0 then
+            print(closest.z.." blocks South")
+        elseif closest.z < 0 then
+            print(math.abs(closest.z).." blocks North")
+        else
+            print("Same North/South position")
+        end
 
         print("")
-        printDirection(target)
+        print(string.format("Distance: %.1f blocks", closestDistance))
 
     else
 
-        print("Searching for "..oreName.."...")
+        print("No "..selected.name.." ore found.")
 
     end
-
 
     sleep(0.5)
 
