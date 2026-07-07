@@ -1,245 +1,211 @@
-local scanner = peripheral.wrap("back")
+local scanner = peripheral.find("geoScanner")
 
 if not scanner then
-    print("No geoScanner found on back!")
+    print("No Geo Scanner found.")
     return
 end
 
+
 local ores = {
-    ["Diamond"] = {
-        "minecraft:diamond_ore",
-        "minecraft:deepslate_diamond_ore"
+    Diamond = {
+        ["minecraft:diamond_ore"] = true,
+        ["minecraft:deepslate_diamond_ore"] = true
     },
 
-    ["Gold"] = {
-        "minecraft:gold_ore",
-        "minecraft:deepslate_gold_ore"
+    Gold = {
+        ["minecraft:gold_ore"] = true,
+        ["minecraft:deepslate_gold_ore"] = true
     },
 
-    ["Iron"] = {
-        "minecraft:iron_ore",
-        "minecraft:deepslate_iron_ore"
+    Iron = {
+        ["minecraft:iron_ore"] = true,
+        ["minecraft:deepslate_iron_ore"] = true
     }
 }
 
 
-local function chooseOre()
-
-    print("=== ORE FINDER ===")
-    print("")
-
-    print("1. Diamond")
-    print("2. Gold")
-    print("3. Iron")
-
-    write("> ")
-
-    local choice = read()
-
-    if choice == "1" then
-        return "Diamond"
-
-    elseif choice == "2" then
-        return "Gold"
-
-    elseif choice == "3" then
-        return "Iron"
-
-    else
-        print("Invalid choice")
-        return chooseOre()
-    end
-end
-
-
-local targetName = chooseOre()
-
+print("=== ORE FINDER ===")
 print("")
-print("Searching for "..targetName)
-sleep(1)
+print("1. Diamond")
+print("2. Gold")
+print("3. Iron")
+print("")
+
+write("Choose ore: ")
+local choice = read()
 
 
-local targets = {}
+local selectedOre
 
-for _,v in pairs(ores[targetName]) do
-    targets[v] = true
+
+if choice == "1" then
+    selectedOre = ores.Diamond
+    print("Tracking Diamonds")
+
+elseif choice == "2" then
+    selectedOre = ores.Gold
+    print("Tracking Gold")
+
+elseif choice == "3" then
+    selectedOre = ores.Iron
+    print("Tracking Iron")
+
+else
+    print("Invalid choice")
+    return
 end
 
 
+local target = nil
 
-local lockedOre = nil
 
-
-local function distance(x,y,z)
-
+local function getDistance(block)
     return math.sqrt(
-        x*x +
-        y*y +
-        z*z
+        block.x^2 +
+        block.y^2 +
+        block.z^2
     )
-
 end
 
 
+local function printDirection(block)
 
-local function direction(x,y,z)
-
-    local dir = ""
-
-    if x > 0 then
-        dir = dir.." EAST"
-    elseif x < 0 then
-        dir = dir.." WEST"
+    if block.x > 0 then
+        print(math.abs(block.x) .. " blocks East")
+    elseif block.x < 0 then
+        print(math.abs(block.x) .. " blocks West")
+    else
+        print("Same East/West position")
     end
 
 
-    if z > 0 then
-        dir = dir.." SOUTH"
-    elseif z < 0 then
-        dir = dir.." NORTH"
+    if block.y > 0 then
+        print(block.y .. " blocks Up")
+    elseif block.y < 0 then
+        print(math.abs(block.y) .. " blocks Down")
+    else
+        print("Same height")
     end
 
 
-    if y > 0 then
-        dir = dir.." UP"
-    elseif y < 0 then
-        dir = dir.." DOWN"
+    if block.z > 0 then
+        print(block.z .. " blocks South")
+    elseif block.z < 0 then
+        print(math.abs(block.z) .. " blocks North")
+    else
+        print("Same North/South position")
     end
 
-
-    return dir
 end
 
 
 
 while true do
 
-    local scan = scanner.scan(
-        16
-    )
+    local results = scanner.scan(16)
 
 
-    -- Check if locked ore still exists
+    -- Check if current target still exists
+    if target then
 
-    if lockedOre then
+        local exists = false
 
-        local stillExists = false
+        for _, block in ipairs(results) do
 
-        for _,block in pairs(scan) do
+            if block.name == target.name
+            and block.x == target.x
+            and block.y == target.y
+            and block.z == target.z then
 
-            if block.name == lockedOre.name
-            and block.x == lockedOre.x
-            and block.y == lockedOre.y
-            and block.z == lockedOre.z then
-
-                stillExists = true
+                exists = true
                 break
             end
 
         end
 
 
-        if not stillExists then
+        if not exists then
 
             print("")
+            print("================")
             print("TARGET MINED!")
             print("Searching again...")
+            print("================")
 
-            lockedOre = nil
-            sleep(1)
+            target = nil
 
         end
-
     end
 
 
 
-    -- Find new target
-
-    if not lockedOre then
+    -- Find a new target
+    if not target then
 
         local closest = nil
         local closestDistance = math.huge
 
 
-        for _,block in pairs(scan) do
+        for _, block in ipairs(results) do
 
-            if targets[block.name] then
+            if selectedOre[block.name] then
 
-                local d = distance(
-                    block.x,
-                    block.y,
-                    block.z
-                )
+                local distance = getDistance(block)
 
+                if distance < closestDistance then
 
-                if d < closestDistance then
-
-                    closestDistance = d
-
+                    closestDistance = distance
                     closest = block
 
                 end
-
             end
-
         end
 
 
         if closest then
 
-            lockedOre = closest
+            target = closest
 
             print("")
-            print("LOCKED ON:")
-            print(targetName)
-            print(
-                lockedOre.name
-            )
+            print("================")
+            print("LOCKED ON")
+            print(target.name)
+            print("================")
 
         end
-
     end
 
 
 
-    -- Display tracking
+    -- Display target information
+    if target then
 
-    if lockedOre then
-
-        local d = distance(
-            lockedOre.x,
-            lockedOre.y,
-            lockedOre.z
-        )
-
+        local distance = getDistance(target)
 
         print("")
         print("----------------")
         print("TARGET:")
-        print(lockedOre.name)
+        print(target.name)
 
         print(
-            "Distance: "..math.floor(d).." blocks"
-        )
-
-        print(
-            "Direction:"..
-            direction(
-                lockedOre.x,
-                lockedOre.y,
-                lockedOre.z
+            string.format(
+                "Distance: %.1f blocks",
+                distance
             )
         )
+
+        print("Direction:")
+
+        printDirection(target)
 
         print("----------------")
 
     else
 
         print("")
-        print("No ore found...")
-    end
+        print("No ore found.")
 
+    end
 
 
     sleep(0.5)
