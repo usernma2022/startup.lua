@@ -1,0 +1,58 @@
+local scanner = peripheral.find("geoScanner")
+
+if not scanner then
+    print("No Geo Scanner found.")
+    return
+end
+
+-- Change this to whatever ore you want
+local TARGET = "minecraft:diamond_ore"
+
+print("Scanning...")
+
+local results = scanner.scan(16) -- Radius (depends on your mod/version)
+
+local found = false
+
+for _, block in ipairs(results) do
+    if block.name == TARGET or block.name == "minecraft:deepslate_diamond_ore" then
+        found = true
+
+        print("------------------------")
+        print("Diamond found!")
+
+        -- X Direction
+        if block.x > 0 then
+            print(block.x .. " blocks East")
+        elseif block.x < 0 then
+            print(math.abs(block.x) .. " blocks West")
+        else
+            print("Same East/West position")
+        end
+
+        -- Y Direction
+        if block.y > 0 then
+            print(block.y .. " blocks Up")
+        elseif block.y < 0 then
+            print(math.abs(block.y) .. " blocks Down")
+        else
+            print("Same height")
+        end
+
+        -- Z Direction
+        if block.z > 0 then
+            print(block.z .. " blocks South")
+        elseif block.z < 0 then
+            print(math.abs(block.z) .. " blocks North")
+        else
+            print("Same North/South position")
+        end
+
+        local distance = math.sqrt(block.x^2 + block.y^2 + block.z^2)
+        print(string.format("Distance: %.1f blocks", distance))
+    end
+end
+
+if not found then
+    print("No diamonds found.")
+end
