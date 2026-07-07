@@ -1,3 +1,5 @@
+-- tung tung
+
 local scanner = peripheral.find("geoScanner")
 
 if not scanner then
