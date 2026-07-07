@@ -1,3 +1,5 @@
+-- tung 2.0
+
 local scanner = peripheral.find("geoScanner")
 
 if not scanner then
@@ -24,9 +26,6 @@ local ores = {
 }
 
 
-term.clear()
-term.setCursorPos(1,1)
-
 print("=== ORE FINDER ===")
 print("")
 print("1 - Diamond")
@@ -34,12 +33,12 @@ print("2 - Gold")
 print("3 - Iron")
 print("")
 
-write("Select: ")
-
+write("Choose: ")
 local choice = read()
 
-local selectedOre = nil
-local oreName = ""
+
+local selectedOre
+local oreName
 
 
 if choice == "1" then
@@ -55,27 +54,29 @@ elseif choice == "3" then
     oreName = "Iron"
 
 else
-    print("Invalid selection")
+    print("Invalid choice")
     return
 end
+
 
 
 local target = nil
 
 
-local function distance(block)
+
+local function getDistance(block)
 
     return math.sqrt(
-        block.x * block.x +
-        block.y * block.y +
-        block.z * block.z
+        block.x^2 +
+        block.y^2 +
+        block.z^2
     )
 
 end
 
 
 
-local function showDirection(block)
+local function printDirection(block)
 
     if block.x > 0 then
         print(math.abs(block.x).." blocks East")
@@ -108,7 +109,8 @@ end
 
 
 print("")
-print("Searching for "..oreName.."...")
+print("Tracking "..oreName)
+
 
 
 while true do
@@ -116,52 +118,34 @@ while true do
     local results = scanner.scan(16)
 
 
-    if type(results) ~= "table" then
-        print("Scanner failed")
-        sleep(1)
-        continue
-    end
 
-
-
-    -- Check locked target
+    -- Check if current target still exists
 
     if target then
 
-        local found = false
+        local stillThere = false
 
 
-        for i = 1, #results do
+        for _, block in ipairs(results) do
 
-            local block = results[i]
+            if block.name == target.name
+            and block.x == target.x
+            and block.y == target.y
+            and block.z == target.z then
 
+                stillThere = true
+                break
 
-            if block
-            and block.name
-            and block.x
-            and block.y
-            and block.z then
-
-
-                if block.name == target.name
-                and block.x == target.x
-                and block.y == target.y
-                and block.z == target.z then
-
-                    found = true
-                    break
-
-                end
             end
+
         end
 
 
-
-        if not found then
+        if not stillThere then
 
             print("")
-            print("TARGET MINED!")
-            print("Finding new target...")
+            print("Target mined!")
+            print("Searching again...")
 
             target = nil
 
@@ -173,40 +157,28 @@ while true do
 
     -- Find closest ore
 
-    if not target then
-
+    if target == nil then
 
         local closest = nil
         local closestDistance = math.huge
 
 
-        for i = 1, #results do
+        for _, block in ipairs(results) do
 
-            local block = results[i]
+            if selectedOre[block.name] then
 
-
-            if block
-            and block.name
-            and block.x
-            and block.y
-            and block.z then
+                local distance = getDistance(block)
 
 
-                if selectedOre[block.name] then
+                if distance < closestDistance then
 
-
-                    local d = distance(block)
-
-
-                    if d < closestDistance then
-
-                        closestDistance = d
-                        closest = block
-
-                    end
+                    closestDistance = distance
+                    closest = block
 
                 end
+
             end
+
         end
 
 
@@ -216,7 +188,7 @@ while true do
             target = closest
 
             print("")
-            print("LOCKED ON:")
+            print("LOCKED ON")
             print(target.name)
 
         end
@@ -225,32 +197,31 @@ while true do
 
 
 
+    -- Display target
+
     term.clear()
     term.setCursorPos(1,1)
 
 
     if target then
 
-        print("=== LOCKED TARGET ===")
+        print("=== ORE LOCK ===")
         print(target.name)
         print("")
 
         print(
             string.format(
                 "Distance: %.1f blocks",
-                distance(target)
+                getDistance(target)
             )
         )
 
         print("")
-        showDirection(target)
-
+        printDirection(target)
 
     else
 
-        print("Searching...")
-        print("")
-        print("No "..oreName.." found nearby.")
+        print("Searching for "..oreName.."...")
 
     end
 
