@@ -37,7 +37,6 @@ local choice = read()
 
 local selectedOre
 
-
 if choice == "1" then
     selectedOre = ores.Diamond
     print("Tracking Diamonds")
@@ -105,20 +104,37 @@ while true do
     local results = scanner.scan(16)
 
 
-    -- Check if current target still exists
+    if type(results) ~= "table" then
+        print("Scanner error")
+        sleep(1)
+        continue
+    end
+
+
+
+    -- Check current target
+
     if target then
 
         local exists = false
 
         for _, block in ipairs(results) do
 
-            if block.name == target.name
-            and block.x == target.x
-            and block.y == target.y
-            and block.z == target.z then
+            if block
+            and block.name
+            and block.x
+            and block.y
+            and block.z then
 
-                exists = true
-                break
+                if block.name == target.name
+                and block.x == target.x
+                and block.y == target.y
+                and block.z == target.z then
+
+                    exists = true
+                    break
+
+                end
             end
 
         end
@@ -129,17 +145,19 @@ while true do
             print("")
             print("================")
             print("TARGET MINED!")
-            print("Searching again...")
+            print("Searching...")
             print("================")
 
             target = nil
 
         end
+
     end
 
 
 
-    -- Find a new target
+    -- Find new target
+
     if not target then
 
         local closest = nil
@@ -148,18 +166,30 @@ while true do
 
         for _, block in ipairs(results) do
 
-            if selectedOre[block.name] then
+            if block
+            and block.name
+            and block.x
+            and block.y
+            and block.z then
 
-                local distance = getDistance(block)
 
-                if distance < closestDistance then
+                if selectedOre[block.name] then
 
-                    closestDistance = distance
-                    closest = block
+                    local distance = getDistance(block)
+
+
+                    if distance < closestDistance then
+
+                        closestDistance = distance
+                        closest = block
+
+                    end
 
                 end
             end
+
         end
+
 
 
         if closest then
@@ -173,14 +203,21 @@ while true do
             print("================")
 
         end
+
     end
 
 
 
-    -- Display target information
-    if target then
+    -- Display tracking
+
+    if target
+    and target.x
+    and target.y
+    and target.z then
+
 
         local distance = getDistance(target)
+
 
         print("")
         print("----------------")
@@ -195,10 +232,10 @@ while true do
         )
 
         print("Direction:")
-
         printDirection(target)
 
         print("----------------")
+
 
     else
 
