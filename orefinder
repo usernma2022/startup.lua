@@ -1,54 +1,247 @@
-local scanner = peripheral.find("geoScanner")
+local scanner = peripheral.wrap("back")
 
 if not scanner then
-    print("No Geo Scanner found.")
+    print("No geoScanner found on back!")
     return
 end
 
-print("Scanning...")
+local ores = {
+    ["Diamond"] = {
+        "minecraft:diamond_ore",
+        "minecraft:deepslate_diamond_ore"
+    },
 
-local results = scanner.scan(16)
+    ["Gold"] = {
+        "minecraft:gold_ore",
+        "minecraft:deepslate_gold_ore"
+    },
 
-local found = false
+    ["Iron"] = {
+        "minecraft:iron_ore",
+        "minecraft:deepslate_iron_ore"
+    }
+}
 
-for _, block in ipairs(results) do
-    if block.name == "minecraft:diamond_ore"
-    or block.name == "minecraft:deepslate_diamond_ore" then
 
-        found = true
+local function chooseOre()
 
-        print("------------------------")
-        print("Diamond found!")
+    print("=== ORE FINDER ===")
+    print("")
 
-        if block.x > 0 then
-            print(block.x .. " blocks East")
-        elseif block.x < 0 then
-            print(math.abs(block.x) .. " blocks West")
-        else
-            print("Same East/West position")
-        end
+    print("1. Diamond")
+    print("2. Gold")
+    print("3. Iron")
 
-        if block.y > 0 then
-            print(block.y .. " blocks Up")
-        elseif block.y < 0 then
-            print(math.abs(block.y) .. " blocks Down")
-        else
-            print("Same height")
-        end
+    write("> ")
 
-        if block.z > 0 then
-            print(block.z .. " blocks South")
-        elseif block.z < 0 then
-            print(math.abs(block.z) .. " blocks North")
-        else
-            print("Same North/South position")
-        end
+    local choice = read()
 
-        local distance = math.sqrt(block.x^2 + block.y^2 + block.z^2)
-        print(string.format("Distance: %.1f blocks", distance))
+    if choice == "1" then
+        return "Diamond"
+
+    elseif choice == "2" then
+        return "Gold"
+
+    elseif choice == "3" then
+        return "Iron"
+
+    else
+        print("Invalid choice")
+        return chooseOre()
     end
 end
 
-if not found then
-    print("No diamonds found.")
+
+local targetName = chooseOre()
+
+print("")
+print("Searching for "..targetName)
+sleep(1)
+
+
+local targets = {}
+
+for _,v in pairs(ores[targetName]) do
+    targets[v] = true
+end
+
+
+
+local lockedOre = nil
+
+
+local function distance(x,y,z)
+
+    return math.sqrt(
+        x*x +
+        y*y +
+        z*z
+    )
+
+end
+
+
+
+local function direction(x,y,z)
+
+    local dir = ""
+
+    if x > 0 then
+        dir = dir.." EAST"
+    elseif x < 0 then
+        dir = dir.." WEST"
+    end
+
+
+    if z > 0 then
+        dir = dir.." SOUTH"
+    elseif z < 0 then
+        dir = dir.." NORTH"
+    end
+
+
+    if y > 0 then
+        dir = dir.." UP"
+    elseif y < 0 then
+        dir = dir.." DOWN"
+    end
+
+
+    return dir
+end
+
+
+
+while true do
+
+    local scan = scanner.scan(
+        16
+    )
+
+
+    -- Check if locked ore still exists
+
+    if lockedOre then
+
+        local stillExists = false
+
+        for _,block in pairs(scan) do
+
+            if block.name == lockedOre.name
+            and block.x == lockedOre.x
+            and block.y == lockedOre.y
+            and block.z == lockedOre.z then
+
+                stillExists = true
+                break
+            end
+
+        end
+
+
+        if not stillExists then
+
+            print("")
+            print("TARGET MINED!")
+            print("Searching again...")
+
+            lockedOre = nil
+            sleep(1)
+
+        end
+
+    end
+
+
+
+    -- Find new target
+
+    if not lockedOre then
+
+        local closest = nil
+        local closestDistance = math.huge
+
+
+        for _,block in pairs(scan) do
+
+            if targets[block.name] then
+
+                local d = distance(
+                    block.x,
+                    block.y,
+                    block.z
+                )
+
+
+                if d < closestDistance then
+
+                    closestDistance = d
+
+                    closest = block
+
+                end
+
+            end
+
+        end
+
+
+        if closest then
+
+            lockedOre = closest
+
+            print("")
+            print("LOCKED ON:")
+            print(targetName)
+            print(
+                lockedOre.name
+            )
+
+        end
+
+    end
+
+
+
+    -- Display tracking
+
+    if lockedOre then
+
+        local d = distance(
+            lockedOre.x,
+            lockedOre.y,
+            lockedOre.z
+        )
+
+
+        print("")
+        print("----------------")
+        print("TARGET:")
+        print(lockedOre.name)
+
+        print(
+            "Distance: "..math.floor(d).." blocks"
+        )
+
+        print(
+            "Direction:"..
+            direction(
+                lockedOre.x,
+                lockedOre.y,
+                lockedOre.z
+            )
+        )
+
+        print("----------------")
+
+    else
+
+        print("")
+        print("No ore found...")
+    end
+
+
+
+    sleep(0.5)
+
 end
