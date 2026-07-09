@@ -1,9 +1,62 @@
-while true do
-    print("UP ONLY")
-    redstone.setOutput("top", true)
-    sleep(2)
+local detector = peripheral.find("player_detector") or peripheral.find("playerDetector")
 
-    print("DOWN ONLY")
-    redstone.setOutput("top", false)
-    sleep(2)
+if not detector then
+    error("No Player Detector found")
 end
+
+print("=== PLAYER DETECTOR INFO ===")
+print()
+
+local name = peripheral.getName(detector)
+print("Peripheral Name: " .. tostring(name))
+print("Peripheral Type: " .. tostring(peripheral.getType(name)))
+print()
+
+print("=== METHODS ===")
+local methods = peripheral.getMethods(name)
+
+table.sort(methods)
+
+for i, method in ipairs(methods) do
+    print(("%02d. %s"):format(i, method))
+end
+
+print()
+print("=== METHOD COUNT ===")
+print(#methods)
+
+print()
+print("=== COMMON TESTS ===")
+
+local tests = {
+    "getOnlinePlayers",
+    "getPlayer",
+    "getPlayersInRange",
+    "getNearestPlayers",
+    "getPlayersInCoords",
+    "isPlayerInRange"
+}
+
+for _, method in ipairs(tests) do
+    if detector[method] then
+        print("[FOUND] " .. method)
+    else
+        print("[MISSING] " .. method)
+    end
+end
+
+print()
+print("=== ONLINE PLAYERS TEST ===")
+
+if detector.getOnlinePlayers then
+    local ok, result = pcall(detector.getOnlinePlayers)
+
+    if ok then
+        print(textutils.serialize(result))
+    else
+        print("ERROR: " .. tostring(result))
+    end
+end
+
+print()
+print("=== FINISHED ===")
