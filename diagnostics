@@ -1,62 +1,19 @@
 local detector = peripheral.find("player_detector") or peripheral.find("playerDetector")
 
-if not detector then
-    error("No Player Detector found")
-end
+local ok, result = pcall(function()
+    return detector.getPlayersInRange(192)
+end)
 
-print("=== PLAYER DETECTOR INFO ===")
-print()
+print("One argument:")
+print(ok)
+print(textutils.serialize(result))
 
-local name = peripheral.getName(detector)
-print("Peripheral Name: " .. tostring(name))
-print("Peripheral Type: " .. tostring(peripheral.getType(name)))
-print()
+print("----------------")
 
-print("=== METHODS ===")
-local methods = peripheral.getMethods(name)
+local ok2, result2 = pcall(function()
+    return detector.getPlayersInRange(0, 0, 0, 192)
+end)
 
-table.sort(methods)
-
-for i, method in ipairs(methods) do
-    print(("%02d. %s"):format(i, method))
-end
-
-print()
-print("=== METHOD COUNT ===")
-print(#methods)
-
-print()
-print("=== COMMON TESTS ===")
-
-local tests = {
-    "getOnlinePlayers",
-    "getPlayer",
-    "getPlayersInRange",
-    "getNearestPlayers",
-    "getPlayersInCoords",
-    "isPlayerInRange"
-}
-
-for _, method in ipairs(tests) do
-    if detector[method] then
-        print("[FOUND] " .. method)
-    else
-        print("[MISSING] " .. method)
-    end
-end
-
-print()
-print("=== ONLINE PLAYERS TEST ===")
-
-if detector.getOnlinePlayers then
-    local ok, result = pcall(detector.getOnlinePlayers)
-
-    if ok then
-        print(textutils.serialize(result))
-    else
-        print("ERROR: " .. tostring(result))
-    end
-end
-
-print()
-print("=== FINISHED ===")
+print("Four arguments:")
+print(ok2)
+print(textutils.serialize(result2))
