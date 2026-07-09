@@ -1,8 +1,16 @@
+--================================================--
+-- AWACS Radar v2
+-- Part 1 / 2
+--================================================--
+
 local function warn(msg)
     print("[AWACS WARNING] " .. msg)
 end
 
--- peripherals
+----------------------------------------------------
+-- PERIPHERALS
+----------------------------------------------------
+
 local chat = peripheral.find("chatBox")
 local detector = peripheral.find("player_detector") or peripheral.find("playerDetector")
 local modem = peripheral.find("modem")
@@ -13,34 +21,82 @@ if monitor ~= term then
 end
 
 local w, h = monitor.getSize()
+local cx = math.floor(w / 2)
+local cy = math.floor(h / 2)
 
-if not detector then warn("Player Detector missing - radar disabled") end
-if not modem then warn("Modem missing - network disabled") else modem.open(1) end
-if not chat then warn("ChatBox missing - alerts disabled") end
+if not detector then
+    warn("Player Detector missing - radar disabled")
+end
+
+if modem then
+    modem.open(1)
+else
+    warn("Modem missing - network disabled")
+end
+
+if not chat then
+    warn("ChatBox missing - alerts disabled")
+end
+
+----------------------------------------------------
+-- CONFIG
+----------------------------------------------------
 
 local cfg = {
-    x = 0, y = 0, z = 0,
+
+    -- Radar position
+    x = 0,
+    y = 0,
+    z = 0,
+
+    -- Advanced Peripherals detector limit
     range = 192,
+
     update = 1,
+
     host = "Usernam_",
+
     cooldown = 10,
+
     chatBroadcast = true
 }
 
+----------------------------------------------------
+-- STATE
+----------------------------------------------------
+
 local memory = {}
-local lastSeen = {}
 local alerted = {}
 
-local lastSend = 0
-local sendRate = 0.5
 local lastAlert = 0
+local lastSend = 0
 
-local function classify(v)
-    local s = v.speed or 0
-    local y = v.y or 0
+local SEND_RATE = 0.5
+
+----------------------------------------------------
+-- HELPERS
+----------------------------------------------------
+
+local function distance(x1, y1, z1, x2, y2, z2)
+
+    local dx = x2 - x1
+    local dy = y2 - y1
+    local dz = z2 - z1
+
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+
+----------------------------------------------------
+-- CONTACT CLASSIFICATION
+----------------------------------------------------
+
+local function classify(contact)
+
+    local speed = contact.speed or 0
+    local y = contact.y or 0
 
     local highAltitude = y >= 80
-    local fast = s >= 25
+    local fast = speed >= 25
 
     if highAltitude and fast then
         return "PLANE"
@@ -50,53 +106,77 @@ local function classify(v)
         return "AIRBORNE"
     end
 
-    if s >= 6 then
+    if speed >= 6 then
         return "FAST"
     end
 
-    if s < 0.4 then
+    if speed < 0.4 then
         return "STATIC"
     end
 
     return "PLAYER"
+
 end
 
-local function isIncoming(v)
-    local o = memory[v.id]
-    if not o then return false end
+----------------------------------------------------
+-- INCOMING CALCULATION
+----------------------------------------------------
 
-    local vx = o.x - o.px
-    local vz = o.z - o.pz
+local function isIncoming(contact)
 
-    local dx = cfg.x - o.x
-    local dz = cfg.z - o.z
+    local vx = contact.x - contact.px
+    local vz = contact.z - contact.pz
 
-    local vlen = math.sqrt(vx*vx + vz*vz)
-    local dlen = math.sqrt(dx*dx + dz*dz)
+    local dx = cfg.x - contact.x
+    local dz = cfg.z - contact.z
 
-    if vlen == 0 or dlen == 0 then return false end
+    local vlen = math.sqrt(vx * vx + vz * vz)
+    local dlen = math.sqrt(dx * dx + dz * dz)
 
-    vx, vz = vx / vlen, vz / vlen
-    dx, dz = dx / dlen, dz / dlen
+    if vlen == 0 or dlen == 0 then
+        return false
+    end
+
+    vx = vx / vlen
+    vz = vz / vlen
+
+    dx = dx / dlen
+    dz = dz / dlen
 
     return (vx * dx + vz * dz) > 0.2
+
 end
 
+----------------------------------------------------
+-- SCAN
+----------------------------------------------------
+
 local function scan()
-    if not detector then return end
+
+    if not detector then
+        return
+    end
 
     local visible = {}
 
-    for _, name in ipairs(detector.getOnlinePlayers()) do
+    -- Only returns players inside 192 blocks.
+    local nearby = detector.getPlayersInRange(cfg.range)
+
+    for _, name in ipairs(nearby) do
+
         local p = detector.getPlayer(name)
 
-        -- nil means the detector can't currently see them
-        if p then
+        if p
+        and type(p.x) == "number"
+        and type(p.y) == "number"
+        and type(p.z) == "number" then
+
             visible[name] = true
 
             local old = memory[name]
 
             memory[name] = {
+
                 id = name,
 
                 x = p.x,
@@ -108,172 +188,354 @@ local function scan()
                 pz = old and old.z or p.z,
 
                 speed = 0
+
             }
 
-            local dx = memory[name].x - memory[name].px
-            local dy = memory[name].y - memory[name].py
-            local dz = memory[name].z - memory[name].pz
-
             memory[name].speed =
-                math.sqrt(dx * dx + dy * dy + dz * dz) / cfg.update
+                distance(
+                    memory[name].x,
+                    memory[name].y,
+                    memory[name].z,
 
-            lastSeen[name] = os.clock()
+                    memory[name].px,
+                    memory[name].py,
+                    memory[name].pz
+                ) / cfg.update
+
         end
     end
 
-    -- remove anyone no longer visible
+    -- Remove contacts that have left detector range.
+
     for name in pairs(memory) do
+
         if not visible[name] then
+
             memory[name] = nil
-            lastSeen[name] = nil
             alerted[name] = nil
+
         end
+
     end
+
 end
 
-local function alert(name, v)
-    if not chat or not cfg.chatBroadcast then return end
+----------------------------------------------------
+-- CHAT ALERTS
+----------------------------------------------------
+
+local function alert(name, contact)
+
+    if not chat then
+        return
+    end
+
+    if not cfg.chatBroadcast then
+        return
+    end
 
     local now = os.clock()
-    if now - lastAlert < cfg.cooldown then return end
+
+    if now - lastAlert < cfg.cooldown then
+        return
+    end
+
     lastAlert = now
 
-    local tag = (v.speed or 0) >= 25 and "AIR THREAT" or "CONTACT"
+    local tag
+
+    if (contact.speed or 0) >= 25 then
+        tag = "AIR THREAT"
+    else
+        tag = "CONTACT"
+    end
 
     chat.sendMessage(
-        "[AWACS] " .. tag .. " DETECTED: " .. name
+        "[AWACS] " ..
+        tag ..
+        " DETECTED: " ..
+        name
     )
+
 end
 
-local function grid()
-    local cx, cy = math.floor(w/2), math.floor(h/2)
-
-    for x = 1, w do
-        monitor.setCursorPos(x, cy)
-        monitor.write("-")
-    end
-
-    for y = 2, h do
-        monitor.setCursorPos(cx, y)
-        monitor.write("|")
-    end
-end
-
-local function toScreen(x, z)
-    local cx, cy = math.floor(w/2), math.floor(h/2)
-    return cx + (x / cfg.range) * (w/2),
-           cy + (z / cfg.range) * (h/2)
-end
+----------------------------------------------------
+-- NETWORK
+----------------------------------------------------
 
 local function sendPacket(contacts, defcon, playerCount)
 
-    if not modem then return end
-    if os.clock() - lastSend < sendRate then return end
+    if not modem then
+        return
+    end
+
+    if os.clock() - lastSend < SEND_RATE then
+        return
+    end
+
     lastSend = os.clock()
 
-    local packet = {
+    modem.transmit(1, 1, textutils.serialize({
+
         system = "radar",
+
         type = "update",
+
         id = "radar_main",
+
         timestamp = os.epoch("utc"),
 
         data = {
+
             defcon = defcon,
+
             range = cfg.range,
 
             position = {
+
                 x = cfg.x,
                 y = cfg.y,
                 z = cfg.z
+
             },
 
             stats = {
+
                 players = playerCount,
                 contacts = #contacts
+
             },
 
             contacts = contacts
-        }
-    }
 
-    modem.transmit(1, 1, textutils.serialize(packet))
+        }
+
+    }))
+
 end
+
+----------------------------------------------------
+-- DISPLAY
+----------------------------------------------------
+
+local function grid()
+
+    for x = 1, w do
+
+        monitor.setCursorPos(x, cy)
+        monitor.write("-")
+
+    end
+
+
+    for y = 2, h do
+
+        monitor.setCursorPos(cx, y)
+        monitor.write("|")
+
+    end
+
+end
+
+
+local function toScreen(x, z)
+
+    return
+        cx + (x / cfg.range) * (w / 2),
+        cy + (z / cfg.range) * (h / 2)
+
+end
+
+
+local function drawContact(contact)
+
+    local dx = contact.x - cfg.x
+    local dz = contact.z - cfg.z
+
+    local sx, sy = toScreen(dx, dz)
+
+
+    if sx >= 1
+    and sx <= w
+    and sy >= 2
+    and sy <= h then
+
+
+        monitor.setCursorPos(
+            math.floor(sx),
+            math.floor(sy)
+        )
+
+
+        if contact.type == "PLANE" then
+
+            monitor.setTextColor(colors.red)
+            monitor.write("A")
+
+
+        elseif contact.type == "AIRBORNE" then
+
+            monitor.setTextColor(colors.orange)
+            monitor.write("^")
+
+
+        elseif contact.type == "FAST" then
+
+            monitor.setTextColor(colors.yellow)
+            monitor.write(">")
+
+
+        else
+
+            monitor.setTextColor(colors.lightBlue)
+            monitor.write("o")
+
+        end
+
+    end
+
+end
+
+
+----------------------------------------------------
+-- DEFCON
+----------------------------------------------------
+
+local function getDefcon(playerCount)
+
+    if playerCount == 0 then
+
+        return "GREEN", colors.green
+
+
+    elseif playerCount < 5 then
+
+        return "YELLOW", colors.yellow
+
+
+    else
+
+        return "RED", colors.red
+
+    end
+
+end
+
+
+----------------------------------------------------
+-- MAIN LOOP
+----------------------------------------------------
 
 while true do
 
+
     scan()
-    cleanup()
+
 
     local contacts = {}
     local playerCount = 0
 
-    for n, p in pairs(memory) do
-        p.type = classify(p)
-        table.insert(contacts, p)
 
-        if n ~= cfg.host then
+    for name, contact in pairs(memory) do
+
+
+        contact.type = classify(contact)
+
+        table.insert(
+            contacts,
+            contact
+        )
+
+
+        if name ~= cfg.host then
+
             playerCount = playerCount + 1
+
         end
+
     end
 
-    -- DEFCON LOGIC
-    local defcon
-    local defconColor
 
-    if playerCount == 0 then
-        defcon = "GREEN"
-        defconColor = colors.green
-    elseif playerCount < 5 then
-        defcon = "YELLOW"
-        defconColor = colors.yellow
-    else
-        defcon = "RED"
-        defconColor = colors.red
-    end
 
-    sendPacket(contacts, defcon, playerCount)
+    local defcon, defconColor =
+        getDefcon(playerCount)
 
-    ---------------------------------------------------
-    -- DISPLAY
-    ---------------------------------------------------
+
+
+    sendPacket(
+        contacts,
+        defcon,
+        playerCount
+    )
+
+
+
+    ------------------------------------------------
+    -- DRAW RADAR
+    ------------------------------------------------
+
 
     monitor.clear()
+
     monitor.setCursorPos(1,1)
 
+
     monitor.setTextColor(colors.white)
-    monitor.write("AWACS | DEFCON: ")
+
+    monitor.write(
+        "AWACS | DEFCON: "
+    )
+
 
     monitor.setTextColor(defconColor)
+
     monitor.write(defcon)
 
+
     monitor.setTextColor(colors.white)
-    monitor.write(" | P:" .. playerCount)
+
+    monitor.write(
+        " | P:" ..
+        playerCount
+    )
+
+
 
     grid()
 
-    for _, v in pairs(memory) do
-        local x, z = v.x - cfg.x, v.z - cfg.z
-        local sx, sy = toScreen(x, z)
 
-        if sx > 0 and sx < w and sy > 1 and sy < h then
-            monitor.setCursorPos(sx, sy)
 
-            if v.type == "PLANE" then
-                monitor.setTextColor(colors.red)
-                monitor.write("A")
-            else
-                monitor.setTextColor(colors.lightBlue)
-                monitor.write("o")
+    for _, contact in pairs(memory) do
+
+
+        drawContact(contact)
+
+
+        if contact.id ~= cfg.host
+        and isIncoming(contact)
+        and (contact.speed or 0) > 6 then
+
+
+            if not alerted[contact.id] then
+
+                alert(
+                    contact.id,
+                    contact
+                )
+
+                alerted[contact.id] = true
+
             end
+
         end
 
-        if v.id ~= cfg.host and isIncoming(v) and (v.speed or 0) > 6 then
-            if not alerted[v.id] then
-                alert(v.id, v)
-                alerted[v.id] = true
-            end
-        end
     end
 
+
+
+    monitor.setTextColor(colors.white)
+
+
     sleep(cfg.update)
+
 end
