@@ -1,0 +1,74 @@
+-- RENAME TO STARTUP TO SECURE COMPUTER
+-- password is Username
+--================================================--
+-- AWACS Secure Computer Login
+--================================================--
+
+-- Prevent Ctrl+T termination
+os.pullEvent = os.pullEventRaw
+
+
+----------------------------------------------------
+-- CONFIG
+----------------------------------------------------
+
+local PASSWORD = "Username"
+
+
+----------------------------------------------------
+-- FUNCTIONS
+----------------------------------------------------
+
+local function clearScreen()
+    term.clear()
+    term.setCursorPos(1, 1)
+end
+
+
+local function denyAccess()
+
+    clearScreen()
+
+    print("==============================")
+    print(" ACCESS DENIED")
+    print("==============================")
+
+    sleep(1)
+
+    os.reboot()
+
+end
+
+
+----------------------------------------------------
+-- LOGIN
+----------------------------------------------------
+
+clearScreen()
+
+print("==============================")
+print(" PASSWORD PROTECTED TERMINAL")
+print("==============================")
+print()
+
+write("Enter password for file config: ")
+
+local input = read("*")
+
+
+if input ~= PASSWORD then
+    denyAccess()
+end
+
+
+----------------------------------------------------
+-- SUCCESS
+----------------------------------------------------
+
+clearScreen()
+
+print("ACCESS GRANTED")
+sleep(0.5)
+
+-- Startup ends here.
+-- ComputerCraft returns to normal shell.
