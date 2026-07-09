@@ -1,56 +1,25 @@
--- Used to see if specific blocks have methods in them that can be controlled in a CC Computer.
+local monitor = peripheral.find("monitor")
+local detector = peripheral.find("player_detector") or peripheral.find("playerDetector")
 
-local function safeCall(obj, fn)
-    if type(obj[fn]) ~= "function" then return end
+monitor.clear()
+monitor.setCursorPos(1,1)
 
-    print("\n>> Testing: " .. fn)
+local line = 1
 
-    local ok, result = pcall(function()
-        return obj[fn]()
-    end)
+for _, player in ipairs(detector.getOnlinePlayers()) do
+    local info = detector.getPlayer(player)
 
-    if ok then
-        if type(result) == "table" then
-            print(textutils.serialize(result))
-        else
-            print(tostring(result))
-        end
-    else
-        print("FAILED: " .. tostring(result))
-    end
-end
+    monitor.setCursorPos(1, line)
+    monitor.write(player)
+    line = line + 1
 
+    local data = textutils.serialize(info)
 
-for _, side in ipairs(peripheral.getNames()) do
-    local p = peripheral.wrap(side)
-
-    print("\n========================")
-    print("SIDE:", side)
-    print("TYPE:", peripheral.getType(side))
-    print("========================")
-
-    for k, v in pairs(p) do
-        if type(v) == "function" then
-            print("METHOD: " .. k)
-        end
+    for str in string.gmatch(data, "[^\n]+") do
+        monitor.setCursorPos(1, line)
+        monitor.write(str)
+        line = line + 1
     end
 
-    print("\n--- METHOD TESTS ---")
-
-    -- common safe probes (won’t break most systems)
-    local tests = {
-        "getInfo",
-        "list",
-        "getItems",
-        "getInventory",
-        "getTanks",
-        "getFluidInTank",
-        "getTargetSpeed",
-        "getEnergy",
-        "getStoredItems"
-    }
-
-    for _, fn in ipairs(tests) do
-        safeCall(p, fn)
-    end
+    line = line + 1
 end
