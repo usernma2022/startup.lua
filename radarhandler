@@ -8,15 +8,19 @@ local detector = peripheral.find("player_detector") or peripheral.find("playerDe
 local modem = peripheral.find("modem")
 local monitor = peripheral.find("monitor") or term
 
+if monitor ~= term then
+    monitor.setTextScale(0.5)
+end
+
+local w, h = monitor.getSize()
+
 if not detector then warn("Player Detector missing - radar disabled") end
 if not modem then warn("Modem missing - network disabled") else modem.open(1) end
 if not chat then warn("ChatBox missing - alerts disabled") end
 
-local w, h = monitor.getSize()
-
 local cfg = {
     x = 0, y = 0, z = 0,
-    range = 1000,
+    range = 192,
     update = 1,
     host = "Usernam_",
     cooldown = 10,
@@ -81,49 +85,48 @@ end
 local function scan()
     if not detector then return end
 
+    local visible = {}
+
     for _, name in ipairs(detector.getOnlinePlayers()) do
         local p = detector.getPlayer(name)
 
+        -- nil means the detector can't currently see them
         if p then
-            local dx = p.x - cfg.x
-            local dz = p.z - cfg.z
+            visible[name] = true
 
-            if dx*dx + dz*dz <= cfg.range*cfg.range then
+            local old = memory[name]
 
-                local old = memory[name]
+            memory[name] = {
+                id = name,
 
-                memory[name] = {
-                    id = name,
-                    x = p.x,
-                    y = p.y,
-                    z = p.z,
+                x = p.x,
+                y = p.y,
+                z = p.z,
 
-                    px = old and old.x or p.x,
-                    py = old and old.y or p.y,
-                    pz = old and old.z or p.z,
+                px = old and old.x or p.x,
+                py = old and old.y or p.y,
+                pz = old and old.z or p.z,
 
-                    speed = 0
-                }
+                speed = 0
+            }
 
-                local dx2 = memory[name].x - memory[name].px
-                local dy2 = memory[name].y - memory[name].py
-                local dz2 = memory[name].z - memory[name].pz
+            local dx = memory[name].x - memory[name].px
+            local dy = memory[name].y - memory[name].py
+            local dz = memory[name].z - memory[name].pz
 
-                memory[name].speed =
-                    math.sqrt(dx2*dx2 + dy2*dy2 + dz2*dz2) / cfg.update
+            memory[name].speed =
+                math.sqrt(dx * dx + dy * dy + dz * dz) / cfg.update
 
-                lastSeen[name] = os.clock()
-            end
+            lastSeen[name] = os.clock()
         end
     end
-end
 
-local function cleanup()
-    for n, t in pairs(lastSeen) do
-        if os.clock() - t > 3 then
-            memory[n] = nil
-            lastSeen[n] = nil
-            alerted[n] = nil
+    -- remove anyone no longer visible
+    for name in pairs(memory) do
+        if not visible[name] then
+            memory[name] = nil
+            lastSeen[name] = nil
+            alerted[name] = nil
         end
     end
 end
