@@ -103,10 +103,8 @@ if granted then
     print()
     print("Welcome.")
 
-    -- Give the card back immediately
     drive.ejectDisk()
 
-    -- Pulse once to open
     redstone.setOutput(DOOR_OUTPUT, true)
     sleep(0.2)
     redstone.setOutput(DOOR_OUTPUT, false)
