@@ -1,0 +1,99 @@
+--------------------------------------------------
+-- AWACS Keycard Reader v1.0
+--------------------------------------------------
+
+local drive = peripheral.find("drive")
+
+if not drive then
+    error("No disk drive found.")
+end
+
+if not drive.isDiskPresent() then
+    error("Please insert a keycard.")
+end
+
+local mount = drive.getMountPath()
+
+if not mount then
+    error("Disk could not be mounted.")
+end
+
+--------------------------------------------------
+-- Read auth.dat
+--------------------------------------------------
+
+local authPath = fs.combine(mount, "auth.dat")
+
+if not fs.exists(authPath) then
+    error("auth.dat not found.")
+end
+
+local f = fs.open(authPath, "r")
+local cardID = f.readAll()
+f.close()
+
+--------------------------------------------------
+-- Read security.dat
+--------------------------------------------------
+
+local security = nil
+local secPath = fs.combine(mount, "security.dat")
+
+if fs.exists(secPath) then
+    local f = fs.open(secPath, "r")
+    security = textutils.unserialize(f.readAll())
+    f.close()
+end
+
+--------------------------------------------------
+-- Read card.dat
+--------------------------------------------------
+
+local card = nil
+local cardPath = fs.combine(mount, "card.dat")
+
+if fs.exists(cardPath) then
+    local f = fs.open(cardPath, "r")
+    card = textutils.unserialize(f.readAll())
+    f.close()
+end
+
+--------------------------------------------------
+-- Display
+--------------------------------------------------
+
+term.clear()
+term.setCursorPos(1,1)
+
+print("================================")
+print("      AWACS KEYCARD READER")
+print("================================")
+print()
+
+print("Card ID:")
+print(cardID)
+print()
+
+if security then
+    print("Security")
+    print("---------")
+    print("Clearance : "..tostring(security.clearance))
+    print("Version   : "..tostring(security.version))
+    print()
+else
+    print("security.dat missing.")
+    print()
+end
+
+if card then
+    print("Card Information")
+    print("----------------")
+    print("Issued : "..tostring(card.issued))
+    print("Issuer : "..tostring(card.issuer))
+    print()
+else
+    print("card.dat missing.")
+    print()
+end
+
+print("Insert another card and rerun to test.")
