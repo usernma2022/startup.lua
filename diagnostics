@@ -1,19 +1,76 @@
-local detector = peripheral.find("player_detector") or peripheral.find("playerDetector")
+--------------------------------------------------
+-- Peripheral Inspector v2.0
+--------------------------------------------------
+
+term.clear()
+term.setCursorPos(1,1)
+
+print("=== Peripheral Inspector ===")
+print()
+
+local names = peripheral.getNames()
+
+for i,name in ipairs(names) do
+    print(i..") "..name.." ("..(peripheral.getType(name) or "?")..")")
+end
+
+print()
+write("Select peripheral number: ")
+
+local choice = tonumber(read())
+
+if not choice or not names[choice] then
+    print("Invalid selection.")
+    return
+end
+
+local name = names[choice]
+local p = peripheral.wrap(name)
+
+term.clear()
+term.setCursorPos(1,1)
+
+print("Inspecting: "..name)
+print("Type: "..peripheral.getType(name))
+print()
+
+local methods = peripheral.getMethods(name)
+table.sort(methods)
+
+for i,m in ipairs(methods) do
+    print(i..") "..m)
+end
+
+print()
+write("Method to call (blank = quit): ")
+
+local method = read()
+
+if method == "" then
+    return
+end
+
+if not p[method] then
+    print("Method doesn't exist.")
+    return
+end
+
+print()
+print("Calling "..method.."...")
 
 local ok, result = pcall(function()
-    return detector.getPlayersInRange(192)
+    return p[method]()
 end)
 
-print("One argument:")
-print(ok)
-print(textutils.serialize(result))
+print("--------------------------------")
 
-print("----------------")
-
-local ok2, result2 = pcall(function()
-    return detector.getPlayersInRange(0, 0, 0, 192)
-end)
-
-print("Four arguments:")
-print(ok2)
-print(textutils.serialize(result2))
+if ok then
+    if type(result) == "table" then
+        print(textutils.serialize(result))
+    else
+        print(tostring(result))
+    end
+else
+    print("Error:")
+    print(result)
+end
