@@ -1,0 +1,88 @@
+-- makes a useable keycard for doors inside the base/compound
+
+--------------------------------------------------
+-- AWACS Keycard Writer v1.0
+--------------------------------------------------
+
+local drive = peripheral.find("drive")
+
+if not drive then
+    error("No Disk Drive found.")
+end
+
+if not drive.isDiskPresent() then
+    error("Insert a floppy disk first.")
+end
+
+local mount = drive.getMountPath()
+
+if not mount then
+    error("Disk is not mounted.")
+end
+
+--------------------------------------------------
+-- Generate random encrypted-looking ID
+--------------------------------------------------
+
+math.randomseed(os.epoch("utc"))
+
+local chars = "0123456789ABCDEF"
+
+local function randomID(length)
+    local id = ""
+
+    for i = 1, length do
+        local n = math.random(#chars)
+        id = id .. chars:sub(n, n)
+    end
+
+    return id
+end
+
+local cardID = randomID(24)
+
+--------------------------------------------------
+-- User Input
+--------------------------------------------------
+
+term.clear()
+term.setCursorPos(1,1)
+
+print("=== AWACS KEYCARD WRITER ===")
+print()
+
+write("Clearance Level (1-5): ")
+
+local clearance = tonumber(read())
+
+if not clearance or clearance < 1 or clearance > 5 then
+    error("Clearance must be between 1 and 5.")
+end
+
+--------------------------------------------------
+-- Save Card
+--------------------------------------------------
+
+local card = {
+    id = cardID,
+    clearance = clearance,
+    issued = os.date("%Y-%m-%d %H:%M:%S")
+}
+
+local file = fs.open(fs.combine(mount, "keycard"), "w")
+file.write(textutils.serialize(card))
+file.close()
+
+--------------------------------------------------
+-- Finished
+--------------------------------------------------
+
+print()
+print("Keycard Written Successfully")
+print()
+print("Card ID:")
+print(cardID)
+print()
+print("Clearance: "..clearance)
+print()
+print("Remove the floppy disk.")
