@@ -12,9 +12,7 @@ end
 term.clear()
 term.setCursorPos(1,1)
 
-print("================================")
 print("      SECURE ACCESS TERMINAL")
-print("================================")
 print()
 print("Insert Keycard...")
 
@@ -76,9 +74,7 @@ end
 term.clear()
 term.setCursorPos(1,1)
 
-print("================================")
 print("      SECURE ACCESS TERMINAL")
-print("================================")
 print()
 
 print("Card Information")
@@ -114,11 +110,7 @@ if granted then
     redstone.setOutput(DOOR_OUTPUT, true)
     sleep(0.2)
     redstone.setOutput(DOOR_OUTPUT, false)
-
-    -- Wait while the door stays open
     sleep(DOOR_OPEN_TIME)
-
-    -- Pulse again to close
     redstone.setOutput(DOOR_OUTPUT, true)
     sleep(0.2)
     redstone.setOutput(DOOR_OUTPUT, false)
@@ -129,7 +121,6 @@ else
     print()
     print("Insufficient Clearance.")
 
-    -- Give the card back immediately
     drive.ejectDisk()
 
 end
