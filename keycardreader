@@ -1,5 +1,17 @@
 --------------------------------------------------
--- AWACS Keycard Reader v1.0
+-- AWACS Door Controller v1.0
+--------------------------------------------------
+
+--------------------------------------------------
+-- CONFIG
+--------------------------------------------------
+
+local DOOR_CLEARANCE = 3
+local DOOR_OUTPUT = "back"
+local DOOR_OPEN_TIME = 3
+
+--------------------------------------------------
+-- FIND DRIVE
 --------------------------------------------------
 
 local drive = peripheral.find("drive")
@@ -8,92 +20,141 @@ if not drive then
     error("No disk drive found.")
 end
 
-if not drive.isDiskPresent() then
-    error("Please insert a keycard.")
-end
-
-local mount = drive.getMountPath()
-
-if not mount then
-    error("Disk could not be mounted.")
-end
-
 --------------------------------------------------
--- Read auth.dat
---------------------------------------------------
-
-local authPath = fs.combine(mount, "auth.dat")
-
-if not fs.exists(authPath) then
-    error("auth.dat not found.")
-end
-
-local f = fs.open(authPath, "r")
-local cardID = f.readAll()
-f.close()
-
---------------------------------------------------
--- Read security.dat
---------------------------------------------------
-
-local security = nil
-local secPath = fs.combine(mount, "security.dat")
-
-if fs.exists(secPath) then
-    local f = fs.open(secPath, "r")
-    security = textutils.unserialize(f.readAll())
-    f.close()
-end
-
---------------------------------------------------
--- Read card.dat
---------------------------------------------------
-
-local card = nil
-local cardPath = fs.combine(mount, "card.dat")
-
-if fs.exists(cardPath) then
-    local f = fs.open(cardPath, "r")
-    card = textutils.unserialize(f.readAll())
-    f.close()
-end
-
---------------------------------------------------
--- Display
+-- WAIT FOR CARD
 --------------------------------------------------
 
 term.clear()
 term.setCursorPos(1,1)
 
 print("================================")
-print("      AWACS KEYCARD READER")
+print("      AWACS ACCESS TERMINAL")
+print("================================")
+print()
+print("Insert Keycard...")
+
+while not drive.isDiskPresent() do
+    sleep(0.1)
+end
+
+local mount = drive.getMountPath()
+
+if not mount then
+    error("Unable to mount disk.")
+end
+
+--------------------------------------------------
+-- READ FILES
+--------------------------------------------------
+
+local function readFile(path)
+
+    if not fs.exists(path) then
+        return nil
+    end
+
+    local f = fs.open(path,"r")
+
+    local data = f.readAll()
+
+    f.close()
+
+    return data
+
+end
+
+local cardID = readFile(fs.combine(mount,"auth.dat"))
+
+if not cardID then
+    print()
+    print("Invalid keycard.")
+    drive.ejectDisk()
+    return
+end
+
+local security = nil
+
+do
+    local txt = readFile(fs.combine(mount,"security.dat"))
+
+    if txt then
+        security = textutils.unserialize(txt)
+    end
+end
+
+local card = nil
+
+do
+    local txt = readFile(fs.combine(mount,"card.dat"))
+
+    if txt then
+        card = textutils.unserialize(txt)
+    end
+end
+
+--------------------------------------------------
+-- DISPLAY
+--------------------------------------------------
+
+term.clear()
+term.setCursorPos(1,1)
+
+print("================================")
+print("      AWACS ACCESS TERMINAL")
 print("================================")
 print()
 
+print("Card Information")
+print("----------------")
+
 print("Card ID:")
 print(cardID)
+
 print()
 
-if security then
-    print("Security")
-    print("---------")
-    print("Clearance : "..tostring(security.clearance))
-    print("Version   : "..tostring(security.version))
-    print()
-else
-    print("security.dat missing.")
-    print()
+print("Clearance : "..tostring(security and security.clearance or "Unknown"))
+
+print("Issued    : "..tostring(card and card.issued or "Unknown"))
+
+print()
+
+--------------------------------------------------
+-- ACCESS CHECK
+--------------------------------------------------
+
+local granted = false
+
+if security and security.clearance >= DOOR_CLEARANCE then
+    granted = true
 end
 
-if card then
-    print("Card Information")
-    print("----------------")
-    print("Issued : "..tostring(card.issued))
-    print("Issuer : "..tostring(card.issuer))
+if granted then
+
+    print("Access Granted")
     print()
+    print("Welcome.")
+
+    redstone.setOutput(DOOR_OUTPUT,true)
+
+    sleep(DOOR_OPEN_TIME)
+
+    redstone.setOutput(DOOR_OUTPUT,false)
+
 else
-    print("card.dat missing.")
+
+    print("Access Denied")
     print()
+    print("Insufficient Clearance.")
+
 end
 
-print("Insert another card and rerun to test.")
+--------------------------------------------------
+-- RETURN CARD
+--------------------------------------------------
+
+sleep(1)
+
+drive.ejectDisk()
+
+print()
+print("Please take your keycard.")
