@@ -1,13 +1,11 @@
--- makes a useable keycard for doors inside the base/compound
-
 --------------------------------------------------
--- AWACS Keycard Writer v1.0
+-- AWACS Keycard Writer v2.0
 --------------------------------------------------
 
 local drive = peripheral.find("drive")
 
 if not drive then
-    error("No Disk Drive found.")
+    error("No disk drive found.")
 end
 
 if not drive.isDiskPresent() then
@@ -17,29 +15,35 @@ end
 local mount = drive.getMountPath()
 
 if not mount then
-    error("Disk is not mounted.")
+    error("Unable to mount disk.")
 end
 
 --------------------------------------------------
--- Generate random encrypted-looking ID
+-- Random ID Generator
 --------------------------------------------------
 
 math.randomseed(os.epoch("utc"))
 
-local chars = "0123456789ABCDEF"
+local HEX = "0123456789ABCDEF"
 
-local function randomID(length)
-    local id = ""
+local function randomHex(length)
+    local s = ""
 
     for i = 1, length do
-        local n = math.random(#chars)
-        id = id .. chars:sub(n, n)
+        local n = math.random(#HEX)
+        s = s .. HEX:sub(n, n)
     end
 
-    return id
+    return s
 end
 
-local cardID = randomID(24)
+-- 128-bit style identifier
+local CARD_ID =
+    randomHex(8) .. "-" ..
+    randomHex(4) .. "-" ..
+    randomHex(4) .. "-" ..
+    randomHex(4) .. "-" ..
+    randomHex(12)
 
 --------------------------------------------------
 -- User Input
@@ -48,7 +52,9 @@ local cardID = randomID(24)
 term.clear()
 term.setCursorPos(1,1)
 
-print("=== AWACS KEYCARD WRITER ===")
+print("================================")
+print("      AWACS KEYCARD WRITER")
+print("================================")
 print()
 
 write("Clearance Level (1-5): ")
@@ -56,33 +62,93 @@ write("Clearance Level (1-5): ")
 local clearance = tonumber(read())
 
 if not clearance or clearance < 1 or clearance > 5 then
-    error("Clearance must be between 1 and 5.")
+    error("Clearance level must be between 1 and 5.")
 end
 
 --------------------------------------------------
--- Save Card
+-- Remove Existing Files
 --------------------------------------------------
 
-local card = {
-    id = cardID,
-    clearance = clearance,
-    issued = os.date("%Y-%m-%d %H:%M:%S")
+local files = {
+    "auth.dat",
+    "security.dat",
+    "card.dat"
 }
 
-local file = fs.open(fs.combine(mount, "keycard"), "w")
-file.write(textutils.serialize(card))
-file.close()
+for _,file in ipairs(files) do
+    local path = fs.combine(mount,file)
+
+    if fs.exists(path) then
+        fs.delete(path)
+    end
+end
+
+--------------------------------------------------
+-- Write auth.dat
+--------------------------------------------------
+
+do
+    local f = fs.open(fs.combine(mount,"auth.dat"),"w")
+
+    f.write(CARD_ID)
+
+    f.close()
+end
+
+--------------------------------------------------
+-- Write security.dat
+--------------------------------------------------
+
+do
+    local f = fs.open(fs.combine(mount,"security.dat"),"w")
+
+    f.write(textutils.serialize({
+        clearance = clearance,
+        version = 2
+    }))
+
+    f.close()
+end
+
+--------------------------------------------------
+-- Write card.dat
+--------------------------------------------------
+
+do
+    local f = fs.open(fs.combine(mount,"card.dat"),"w")
+
+    f.write(textutils.serialize({
+        issued = os.date("%Y-%m-%d %H:%M:%S"),
+        issuer = "AWACS Security Division"
+    }))
+
+    f.close()
+end
 
 --------------------------------------------------
 -- Finished
 --------------------------------------------------
 
+term.clear()
+term.setCursorPos(1,1)
+
+print("================================")
+print("      CARD SUCCESSFULLY MADE")
+print("================================")
 print()
-print("Keycard Written Successfully")
-print()
+
 print("Card ID:")
-print(cardID)
+print(CARD_ID)
+
 print()
-print("Clearance: "..clearance)
+print("Clearance Level: "..clearance)
+
+print()
+print("Files written:")
+
+print(" - auth.dat")
+print(" - security.dat")
+print(" - card.dat")
+
 print()
 print("Remove the floppy disk.")
