@@ -1,100 +1,186 @@
 --------------------------------------------------
--- ComputerCraft Radio Spectrum Analyzer
--- 4 modem channel scanner + monitor display
--- Reads every message sent on modems and records that on a 3x3 monitor.
+--------------------------------------------------
+-- Radio Spectrum Analyzer
+-- Rotating scanner + message logger
 --------------------------------------------------
 
 local monitor = peripheral.find("monitor")
 
 if not monitor then
-    error("No monitor found")
+    error("No monitor attached")
 end
+
+
+monitor.setTextScale(0.5)
 
 
 --------------------------------------------------
 -- CONFIG
 --------------------------------------------------
 
+local LOG_FILE = "interests"
+
+local CHUNK_SIZE = 128
+
+local SCAN_DELAY = 2
+
+local MAX_DISPLAY = 8
+
+
 local MODEMS = {
     back = {
-        min = 0,
+        current = 0,
         max = 16383
     },
 
     left = {
-        min = 16384,
+        current = 16384,
         max = 32767
     },
 
     right = {
-        min = 32768,
+        current = 32768,
         max = 49151
     },
 
     bottom = {
-        min = 49152,
+        current = 49152,
         max = 65535
     }
 }
 
 
-local MAX_DISPLAY = 8
-
-
 --------------------------------------------------
--- DATA STORAGE
+-- DATA
 --------------------------------------------------
 
 local channels = {}
 
-local totalPackets = 0
+local totalMessages = 0
 
-
---------------------------------------------------
--- MONITOR SETUP
---------------------------------------------------
-
-monitor.setTextScale(0.5)
 
 
 --------------------------------------------------
--- OPEN CHANNELS
+-- LOGGING
 --------------------------------------------------
 
-for side, range in pairs(MODEMS) do
+local function logMessage(channel, side, message)
 
-    local modem = peripheral.wrap(side)
+    local file =
+        fs.open(
+            LOG_FILE,
+            "a"
+        )
 
-    if modem then
+    if file then
 
-        print(
-            "Opening "
-            .. side
-            .. " channels "
-            .. range.min
-            .. "-"
-            .. range.max
+        file.writeLine(
+            "--------------------------------"
+        )
+
+        file.writeLine(
+            "[" ..
+            os.date("%H:%M:%S")
+            ..
+            "] CH:"
+            ..
+            channel
+            ..
+            " MODEM:"
+            ..
+            side
         )
 
 
-        for c = range.min, range.max do
-            modem.open(c)
-        end
-
-    else
-        print(
-            "Missing modem on "
-            .. side
+        file.writeLine(
+            "MESSAGE:"
         )
+
+
+        file.writeLine(
+            textutils.serialize(message)
+        )
+
+
+        file.close()
+
     end
+
 end
 
 
+
 --------------------------------------------------
--- SORT FUNCTION
+-- OPEN SCAN CHUNK
 --------------------------------------------------
 
-local function getSorted()
+local function scanChunk(side)
+
+    local modem =
+        peripheral.wrap(side)
+
+    if not modem then
+        return
+    end
+
+
+    local data =
+        MODEMS[side]
+
+
+    -- close previous scan range
+
+    for i =
+        data.current,
+        math.min(
+            data.current + CHUNK_SIZE - 1,
+            data.max
+        )
+    do
+        modem.close(i)
+    end
+
+
+
+    -- move forward
+
+    data.current =
+        data.current + CHUNK_SIZE
+
+
+
+    if data.current > data.max then
+
+        data.current =
+            data.max - CHUNK_SIZE + 1
+
+    end
+
+
+
+    -- open new range
+
+    for i =
+        data.current,
+        math.min(
+            data.current + CHUNK_SIZE - 1,
+            data.max
+        )
+    do
+
+        modem.open(i)
+
+    end
+
+end
+
+
+
+--------------------------------------------------
+-- SORT CHANNELS
+--------------------------------------------------
+
+local function sortedChannels()
 
     local list = {}
 
@@ -105,8 +191,7 @@ local function getSorted()
             {
                 channel = channel,
                 hits = data.hits,
-                modem = data.modem,
-                last = data.last
+                side = data.side
             }
         )
 
@@ -116,7 +201,9 @@ local function getSorted()
     table.sort(
         list,
         function(a,b)
+
             return a.hits > b.hits
+
         end
     )
 
@@ -126,37 +213,47 @@ local function getSorted()
 end
 
 
+
 --------------------------------------------------
--- DRAW DISPLAY
+-- DRAW MONITOR
 --------------------------------------------------
 
 local function draw()
 
     monitor.clear()
+
     monitor.setCursorPos(1,1)
 
-
     monitor.write(
-        " RADIO SPECTRUM"
+        "RADIO SPECTRUM"
     )
+
 
     monitor.setCursorPos(1,2)
 
     monitor.write(
-        "Packets: "
-        .. totalPackets
+        "MSG:"
+        ..
+        totalMessages
     )
 
 
-    local list = getSorted()
+    local list =
+        sortedChannels()
 
 
     local y = 4
 
 
-    for i = 1, math.min(MAX_DISPLAY,#list) do
+    for i = 1,
+        math.min(
+            MAX_DISPLAY,
+            #list
+        )
+    do
 
-        local item = list[i]
+        local c =
+            list[i]
 
 
         monitor.setCursorPos(
@@ -165,33 +262,33 @@ local function draw()
         )
 
 
-        local bar =
+        monitor.write(
+            string.format(
+                "%5d ",
+                c.channel
+            )
+        )
+
+
+        monitor.write(
             string.rep(
                 "#",
                 math.min(
                     10,
-                    item.hits
+                    c.hits
                 )
-            )
-
-
-        monitor.write(
-            string.format(
-                "%5d %-10s",
-                item.channel,
-                bar
             )
         )
 
 
         monitor.setCursorPos(
-            18,
+            17,
             y
         )
 
 
         monitor.write(
-            item.modem
+            c.side
         )
 
 
@@ -199,66 +296,101 @@ local function draw()
 
     end
 
+end
 
-    monitor.setCursorPos(1,14)
 
-    monitor.write(
-        "ACTIVE: "
-        .. #list
-    )
+
+--------------------------------------------------
+-- START SCANNERS
+--------------------------------------------------
+
+for side in pairs(MODEMS) do
+
+    scanChunk(side)
 
 end
 
 
 
 --------------------------------------------------
--- MAIN LOOP
+-- MAIN
 --------------------------------------------------
 
 while true do
 
 
-    local event,
-          side,
-          channel,
-          reply,
-          message,
-          distance =
-          os.pullEvent(
-              "modem_message"
-          )
+    -- rotate scanner
 
+    for side in pairs(MODEMS) do
 
-    totalPackets =
-        totalPackets + 1
-
-
-
-    if not channels[channel] then
-
-        channels[channel] = {
-
-            hits = 0,
-
-            modem = side,
-
-            last = os.clock()
-
-        }
+        scanChunk(side)
 
     end
 
 
 
-    channels[channel].hits =
-        channels[channel].hits + 1
+    -- check messages briefly
+
+    local timer =
+        os.startTimer(
+            SCAN_DELAY
+        )
 
 
-    channels[channel].last =
-        os.clock()
+    while true do
+
+        local event,
+              a,
+              channel,
+              reply,
+              message =
+              os.pullEvent()
+
+
+        if event == "modem_message" then
+
+
+            totalMessages =
+                totalMessages + 1
 
 
 
-    draw()
+            if not channels[channel] then
+
+                channels[channel] =
+                {
+                    hits = 0,
+                    side = a
+                }
+
+            end
+
+
+
+            channels[channel].hits =
+                channels[channel].hits + 1
+
+
+
+            logMessage(
+                channel,
+                a,
+                message
+            )
+
+
+
+            draw()
+
+
+
+        elseif event == "timer"
+        and a == timer then
+
+            break
+
+        end
+
+    end
 
 end
