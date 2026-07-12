@@ -1,0 +1,264 @@
+--------------------------------------------------
+-- ComputerCraft Radio Spectrum Analyzer
+-- 4 modem channel scanner + monitor display
+-- Reads every message sent on modems and records that on a 3x3 monitor.
+--------------------------------------------------
+
+local monitor = peripheral.find("monitor")
+
+if not monitor then
+    error("No monitor found")
+end
+
+
+--------------------------------------------------
+-- CONFIG
+--------------------------------------------------
+
+local MODEMS = {
+    back = {
+        min = 0,
+        max = 16383
+    },
+
+    left = {
+        min = 16384,
+        max = 32767
+    },
+
+    right = {
+        min = 32768,
+        max = 49151
+    },
+
+    bottom = {
+        min = 49152,
+        max = 65535
+    }
+}
+
+
+local MAX_DISPLAY = 8
+
+
+--------------------------------------------------
+-- DATA STORAGE
+--------------------------------------------------
+
+local channels = {}
+
+local totalPackets = 0
+
+
+--------------------------------------------------
+-- MONITOR SETUP
+--------------------------------------------------
+
+monitor.setTextScale(0.5)
+
+
+--------------------------------------------------
+-- OPEN CHANNELS
+--------------------------------------------------
+
+for side, range in pairs(MODEMS) do
+
+    local modem = peripheral.wrap(side)
+
+    if modem then
+
+        print(
+            "Opening "
+            .. side
+            .. " channels "
+            .. range.min
+            .. "-"
+            .. range.max
+        )
+
+
+        for c = range.min, range.max do
+            modem.open(c)
+        end
+
+    else
+        print(
+            "Missing modem on "
+            .. side
+        )
+    end
+end
+
+
+--------------------------------------------------
+-- SORT FUNCTION
+--------------------------------------------------
+
+local function getSorted()
+
+    local list = {}
+
+    for channel,data in pairs(channels) do
+
+        table.insert(
+            list,
+            {
+                channel = channel,
+                hits = data.hits,
+                modem = data.modem,
+                last = data.last
+            }
+        )
+
+    end
+
+
+    table.sort(
+        list,
+        function(a,b)
+            return a.hits > b.hits
+        end
+    )
+
+
+    return list
+
+end
+
+
+--------------------------------------------------
+-- DRAW DISPLAY
+--------------------------------------------------
+
+local function draw()
+
+    monitor.clear()
+    monitor.setCursorPos(1,1)
+
+
+    monitor.write(
+        " RADIO SPECTRUM"
+    )
+
+    monitor.setCursorPos(1,2)
+
+    monitor.write(
+        "Packets: "
+        .. totalPackets
+    )
+
+
+    local list = getSorted()
+
+
+    local y = 4
+
+
+    for i = 1, math.min(MAX_DISPLAY,#list) do
+
+        local item = list[i]
+
+
+        monitor.setCursorPos(
+            1,
+            y
+        )
+
+
+        local bar =
+            string.rep(
+                "#",
+                math.min(
+                    10,
+                    item.hits
+                )
+            )
+
+
+        monitor.write(
+            string.format(
+                "%5d %-10s",
+                item.channel,
+                bar
+            )
+        )
+
+
+        monitor.setCursorPos(
+            18,
+            y
+        )
+
+
+        monitor.write(
+            item.modem
+        )
+
+
+        y = y + 1
+
+    end
+
+
+    monitor.setCursorPos(1,14)
+
+    monitor.write(
+        "ACTIVE: "
+        .. #list
+    )
+
+end
+
+
+
+--------------------------------------------------
+-- MAIN LOOP
+--------------------------------------------------
+
+while true do
+
+
+    local event,
+          side,
+          channel,
+          reply,
+          message,
+          distance =
+          os.pullEvent(
+              "modem_message"
+          )
+
+
+    totalPackets =
+        totalPackets + 1
+
+
+
+    if not channels[channel] then
+
+        channels[channel] = {
+
+            hits = 0,
+
+            modem = side,
+
+            last = os.clock()
+
+        }
+
+    end
+
+
+
+    channels[channel].hits =
+        channels[channel].hits + 1
+
+
+    channels[channel].last =
+        os.clock()
+
+
+
+    draw()
+
+end
