@@ -1,0 +1,21 @@
+local detector = peripheral.find("environmentDetector")
+
+if not detector then
+    error("Environment Detector not found!")
+end
+
+print("Thunderstorm Alarm Started")
+
+while true do
+    if detector.isThunder() then
+        -- Rapidly pulse the noteblock
+        redstone.setOutput("right", true)
+        sleep(0.2)
+        redstone.setOutput("right", false)
+        sleep(0.2)
+    else
+        -- Ensure the output is off when there's no thunderstorm
+        redstone.setOutput("right", false)
+        sleep(2)
+    end
+end
