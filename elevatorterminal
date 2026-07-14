@@ -1,0 +1,291 @@
+
+local drive = peripheral.find("drive")
+
+if not drive then
+    error("No disk drive found.")
+end
+
+local currentFloor = 1
+
+local floors = {
+
+    ["Surface"] = {
+        id = 1,
+        clearance = 1,
+        output = "back"
+    },
+
+
+    ["Factory"] = {
+        id = 2,
+        clearance = 2,
+        output = "left"
+    }
+
+}
+
+local function clear()
+
+    term.clear()
+    term.setCursorPos(1,1)
+
+end
+
+local function waitForCard()
+
+    print("Insert keycard...")
+
+    while not drive.isDiskPresent() do
+        sleep(1)
+    end
+
+end
+
+local function getClearance()
+
+    local mount = drive.getMountPath()
+
+    if not mount then
+        return nil
+    end
+
+
+    local path =
+        fs.combine(
+            mount,
+            "security.dat"
+        )
+
+
+    if not fs.exists(path) then
+        return nil
+    end
+
+
+    local file =
+        fs.open(path,"r")
+
+
+    local data =
+        textutils.unserialize(
+            file.readAll()
+        )
+
+
+    file.close()
+
+
+    if data then
+        return data.clearance
+    end
+
+
+    return nil
+
+end
+
+
+
+local function ejectCard()
+
+    drive.ejectDisk()
+
+    print()
+    print("Remove card.")
+
+    while drive.isDiskPresent() do
+        sleep(1)
+    end
+
+end
+
+
+
+local function callElevator(destination)
+
+    local floor =
+        floors[destination]
+
+
+    print()
+    print(
+        "Calling elevator:"
+    )
+
+    print(destination)
+
+
+    redstone.setOutput(
+        floor.output,
+        true
+    )
+
+
+    sleep(1)
+
+
+    redstone.setOutput(
+        floor.output,
+        false
+    )
+
+
+end
+
+
+
+local function selectFloor(clearance)
+
+
+    while true do
+
+        clear()
+
+
+        print(" ELEVATOR CONTROL TERMINAL")
+        print()
+
+
+        local options = {}
+        local count = 1
+
+
+        for name,data in pairs(floors) do
+
+
+            -- Hide current floor
+
+            if data.id ~= currentFloor then
+
+
+                if clearance >= data.clearance then
+
+
+                    options[count] = name
+
+
+                    print(
+                        count..
+                        ". "..
+                        name
+                    )
+
+
+                    count = count + 1
+
+
+                end
+
+            end
+
+        end
+
+
+        if #options == 0 then
+
+            print(
+                "No available floors."
+            )
+
+            sleep(3)
+
+            return
+
+        end
+
+
+
+        print()
+
+        write(
+            "Select floor: "
+        )
+
+
+        local input =
+            tonumber(
+                read()
+            )
+
+
+        local selected =
+            options[input]
+
+
+        if selected then
+
+            callElevator(
+                selected
+            )
+
+            sleep(3)
+
+            return
+
+        else
+
+            print(
+                "Invalid selection."
+            )
+
+            sleep(2)
+
+        end
+
+    end
+
+end
+
+while true do
+
+    clear()
+
+
+    print(" ELEVATOR CONTROL TERMINAL")
+    print()
+
+
+    waitForCard()
+
+
+    local clearance =
+        getClearance()
+
+
+    ejectCard()
+
+
+
+    if clearance then
+
+
+        print(
+            "Clearance Level: "
+            ..
+            clearance
+        )
+
+
+        sleep(1)
+
+
+        selectFloor(
+            clearance
+        )
+
+
+    else
+
+
+        print(
+            "INVALID CARD"
+        )
+
+
+        sleep(3)
+
+
+    end
+
+
+end
