@@ -1,6 +1,6 @@
--- Tactical Radar V9
+-- Tactical Radar V10
 -- CC:Tweaked + Advanced Peripherals Player Detector
--- Layered rendering version
+-- Buffered renderer
 
 
 local monitor = peripheral.find("monitor")
@@ -13,7 +13,7 @@ end
 
 
 if not detector then
-    error("Player detector missing")
+    error("Player Detector missing")
 end
 
 
@@ -30,10 +30,12 @@ local w,h = monitor.getSize()
 
 
 
+-- REAL RADAR RANGE
 local RADAR_RANGE = 192
 
 
 
+-- VISUAL ZOOM
 local zoomLevels = {
     64,
     96,
@@ -57,51 +59,17 @@ local origin = {
 
 
 ------------------------------------------------
--- WINDOWS
+-- BUFFER
 ------------------------------------------------
 
 
-local background =
+local buffer =
     window.create(
         monitor,
         1,
         1,
         w,
-        h,
-        true
-    )
-
-
-local sweepWindow =
-    window.create(
-        monitor,
-        1,
-        1,
-        w,
-        h,
-        true
-    )
-
-
-local contactWindow =
-    window.create(
-        monitor,
-        1,
-        1,
-        w,
-        h,
-        true
-    )
-
-
-local uiWindow =
-    window.create(
-        monitor,
-        1,
-        1,
-        w,
-        h,
-        true
+        h
     )
 
 
@@ -120,22 +88,23 @@ local sweepAngle = 0
 ------------------------------------------------
 
 
-local function write(win,x,y,text,color)
+local function write(termObj,x,y,text,color)
+
 
     if x < 1 or x > w or y < 1 or y > h then
         return
     end
 
 
-    win.setCursorPos(
+    termObj.setCursorPos(
         math.floor(x),
         math.floor(y)
     )
 
 
-    win.setTextColor(color)
+    termObj.setTextColor(color)
 
-    win.write(text)
+    termObj.write(text)
 
 end
 
@@ -155,7 +124,7 @@ end
 
 
 ------------------------------------------------
--- MATH
+-- POSITION MATH
 ------------------------------------------------
 
 
@@ -172,17 +141,14 @@ local function worldToRadar(x,z)
 
 
     return
-
-    math.floor(
-        w/2+x*scaleX
-    ),
-
-    math.floor(
-        h/2-z*scaleY
-    )
+        math.floor(
+            w/2+x*scaleX
+        ),
+        math.floor(
+            h/2-z*scaleY
+        )
 
 end
-
 
 
 
@@ -190,8 +156,9 @@ end
 local function radarRadius()
 
 
-    return RADAR_RANGE *
-        (w/2) /
+    return
+        RADAR_RANGE*
+        (w/2)/
         zoom
 
 end
@@ -199,20 +166,20 @@ end
 
 
 ------------------------------------------------
--- BACKGROUND
+-- STATIC DRAW
 ------------------------------------------------
 
 
 local function drawBackground()
 
 
-    background.setBackgroundColor(colors.black)
+    buffer.setBackgroundColor(colors.black)
 
-    background.clear()
+    buffer.clear()
 
 
 
-    -- grid
+    -- Grid
 
     for y=2,h-2 do
 
@@ -222,7 +189,7 @@ local function drawBackground()
             if x%5==0 and y%3==0 then
 
                 write(
-                    background,
+                    buffer,
                     x,
                     y,
                     ".",
@@ -231,19 +198,18 @@ local function drawBackground()
 
             end
 
-
         end
 
     end
 
 
 
-
-    -- radar circle
+    -- Radar ring
 
 
     local radius =
         radarRadius()
+
 
 
     local yRadius =
@@ -251,11 +217,11 @@ local function drawBackground()
 
 
 
-    for angle=0,360,3 do
+    for a=0,360,3 do
 
 
         local r =
-            math.rad(angle)
+            math.rad(a)
 
 
 
@@ -273,25 +239,24 @@ local function drawBackground()
             )
 
 
+
         write(
-            background,
+            buffer,
             x,
             y,
             ".",
             colors.lightBlue
         )
 
-
     end
 
 
 
-
-    -- compass
+    -- Compass
 
 
     write(
-        background,
+        buffer,
         math.floor(w/2),
         1,
         "N",
@@ -300,7 +265,7 @@ local function drawBackground()
 
 
     write(
-        background,
+        buffer,
         math.floor(w/2),
         h,
         "S",
@@ -309,7 +274,7 @@ local function drawBackground()
 
 
     write(
-        background,
+        buffer,
         1,
         math.floor(h/2),
         "W",
@@ -318,7 +283,7 @@ local function drawBackground()
 
 
     write(
-        background,
+        buffer,
         w,
         math.floor(h/2),
         "E",
@@ -328,7 +293,7 @@ local function drawBackground()
 
 
     write(
-        background,
+        buffer,
         math.floor(w/2),
         math.floor(h/2),
         "+",
@@ -347,13 +312,8 @@ end
 local function drawSweep()
 
 
-    sweepWindow.clear()
-
-
-
     local radius =
         radarRadius()
-
 
 
     local yRadius =
@@ -386,9 +346,9 @@ local function drawSweep()
             local x =
                 math.floor(
                     w/2+
-                    math.cos(angle)
-                    *radius
-                    *ratio
+                    math.cos(angle)*
+                    radius*
+                    ratio
                 )
 
 
@@ -396,15 +356,15 @@ local function drawSweep()
             local y =
                 math.floor(
                     h/2+
-                    math.sin(angle)
-                    *yRadius
-                    *ratio
+                    math.sin(angle)*
+                    yRadius*
+                    ratio
                 )
 
 
 
             write(
-                sweepWindow,
+                buffer,
                 x,
                 y,
                 ".",
@@ -413,7 +373,6 @@ local function drawSweep()
 
 
         end
-
 
     end
 
@@ -430,26 +389,24 @@ local function updateSweep()
         sweepAngle+4
 
 
-    if sweepAngle>=360 then
 
-        sweepAngle=0
+    if sweepAngle >= 360 then
+
+        sweepAngle = 0
 
     end
+
 
 end
 
 
 
 ------------------------------------------------
--- CONTACTS
+-- PLAYERS
 ------------------------------------------------
 
 
-local function drawContacts()
-
-
-    contactWindow.clear()
-
+local function drawPlayers()
 
 
     local players =
@@ -460,6 +417,7 @@ local function drawContacts()
 
 
     for _,name in ipairs(players) do
+
 
 
         if detector.isPlayerInRange(
@@ -477,8 +435,11 @@ local function drawContacts()
             if pos then
 
 
-                local x,z =
-                    pos.x-origin.x,
+                local x =
+                    pos.x-origin.x
+
+
+                local z =
                     pos.z-origin.z
 
 
@@ -497,7 +458,7 @@ local function drawContacts()
 
 
                     write(
-                        contactWindow,
+                        buffer,
                         sx,
                         sy,
                         "+",
@@ -513,43 +474,43 @@ local function drawContacts()
 
                     if labelX+12>w then
 
-                        labelX=sx-12
+                        labelX =
+                            sx-12
 
                     end
 
 
 
-                    -- PL green
+                    -- PL
 
-                    contactWindow.setCursorPos(
+                    buffer.setCursorPos(
                         labelX,
                         sy
                     )
 
-                    contactWindow.setTextColor(
+                    buffer.setTextColor(
                         colors.green
                     )
 
-                    contactWindow.write(
+                    buffer.write(
                         "PL "
                     )
 
 
+                    -- Name
 
-                    -- Name white
-
-                    contactWindow.setTextColor(
+                    buffer.setTextColor(
                         colors.white
                     )
 
-                    contactWindow.write(
+                    buffer.write(
                         name
                     )
 
 
 
                     write(
-                        contactWindow,
+                        buffer,
                         labelX,
                         sy+1,
                         distance(x,z).."m",
@@ -558,7 +519,6 @@ local function drawContacts()
 
 
                 end
-
 
             end
 
@@ -581,12 +541,8 @@ end
 local function drawUI()
 
 
-    uiWindow.clear()
-
-
-
     write(
-        uiWindow,
+        buffer,
         2,
         h,
         "[-]",
@@ -595,7 +551,7 @@ local function drawUI()
 
 
     write(
-        uiWindow,
+        buffer,
         6,
         h,
         zoom.."m",
@@ -604,7 +560,7 @@ local function drawUI()
 
 
     write(
-        uiWindow,
+        buffer,
         14,
         h,
         "[+]",
@@ -617,7 +573,32 @@ end
 
 
 ------------------------------------------------
--- BUTTONS
+-- DISPLAY FRAME
+------------------------------------------------
+
+
+local function render()
+
+
+    drawBackground()
+
+    drawSweep()
+
+    drawPlayers()
+
+    drawUI()
+
+
+
+    buffer.redraw()
+
+
+end
+
+
+
+------------------------------------------------
+-- ZOOM
 ------------------------------------------------
 
 
@@ -627,7 +608,7 @@ local function changeZoom(amount)
     for i,v in ipairs(zoomLevels) do
 
 
-        if v==zoom then
+        if v == zoom then
 
 
             local index =
@@ -650,19 +631,12 @@ local function changeZoom(amount)
                 zoomLevels[index]
 
 
-
-            drawBackground()
-
-            drawUI()
-
-
             return
 
         end
 
 
     end
-
 
 end
 
@@ -682,7 +656,7 @@ local function buttonLoop()
 
 
 
-        if y==h then
+        if y == h then
 
 
             if x>=2 and x<=4 then
@@ -712,39 +686,29 @@ end
 ------------------------------------------------
 
 
-drawBackground()
+parallel.waitForAny(
 
-drawUI()
-
-
-while true do
+    buttonLoop,
 
 
-    parallel.waitForAny(
-
-        buttonLoop,
+    function()
 
 
-        function()
+        while true do
 
 
-            while true do
+            render()
 
 
-                drawSweep()
-
-                drawContacts()
-
-                updateSweep()
-
-                sleep(0.15)
+            updateSweep()
 
 
-            end
+            sleep(0.15)
 
 
         end
 
-    )
 
-end
+    end
+
+)
