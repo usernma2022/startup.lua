@@ -1,38 +1,256 @@
+--------------------------------------------------
+-- AEGIS COMMAND TERMINAL v1.0
+--------------------------------------------------
+
 local monitor = peripheral.find("monitor")
 local modem = peripheral.find("modem")
+
 local channel = 1
-local updateTime = 1
+local password = "7KQ9V2MX4R8PZ1T6N3W5H0JY9BLC8FQA"
 
-local function fix(xv, yv)
-    monitor.setTextColor(colors.white)
-    monitor.setTextScale(0.75)
-    monitor.setCursorPos(xv, yv)
+term.clear()
+term.setCursorPos(1,1)
+
+print("--------------")
+print("AEGIS TERMINAL")
+print("--------------")
+print()
+
+write("Enter terminal key: ")
+
+local input = read("*")
+
+
+if input ~= password then
+
+    print()
+    print("ACCESS DENIED")
+
+    sleep(2)
+
+    os.reboot()
+
 end
 
-local function setupBoard()
-    fix(1, 1)
-    monitor.write("-------------------------------------------------------------------------------------------------------------------------------------------------------")
-    monitor.setCursorPos(1, 2)
-    monitor.setTextColor(colors.yellow)
-    monitor.write("-------| COMMAND STATUS |---------------| COMBAT READINESS |--------------| PROTOCOLS ACTIVE |------")
-    local width, height = monitor.getSize()
-    fix(1, 2)
-    for i = 1, 2 do
-        local pillarX = math.floor(width / 3) * i
-        for y = 1, height do
-            monitor.setCursorPos(pillarX, y)
-            monitor.write("|")
-        end
+
+print()
+print("ACCESS GRANTED")
+
+sleep(1)
+
+if not monitor then
+    error("No monitor detected")
+end
+
+
+if not modem then
+    error("No modem detected")
+end
+
+
+modem.open(channel)
+
+monitor.setTextScale(0.75)
+
+local width,height = monitor.getSize()
+
+
+local systems = {
+
+    elevator = {
+        status = "UNKNOWN"
+    },
+
+    power = {
+        status = "UNKNOWN"
+    },
+
+    fuel = {
+        status = "UNKNOWN"
+    }
+
+}
+
+local function clearMonitor()
+
+    monitor.clear()
+    monitor.setCursorPos(1,1)
+
+end
+
+
+
+local function drawHeader()
+
+    monitor.setCursorPos(1,1)
+
+    monitor.write(
+        "=============================="
+    )
+
+    monitor.setCursorPos(1,2)
+
+    monitor.write(
+        "        AEGIS COMMAND"
+    )
+
+    monitor.setCursorPos(1,3)
+
+    monitor.write(
+        "=============================="
+    )
+
+end
+
+
+
+local function drawColumns()
+
+
+    local third = math.floor(width/3)
+
+
+    for y = 5,height do
+
+        monitor.setCursorPos(third,y)
+        monitor.write("|")
+
+
+        monitor.setCursorPos(third*2,y)
+        monitor.write("|")
+
     end
+
+
+    monitor.setCursorPos(2,4)
+    monitor.write("COMMAND")
+
+
+    monitor.setCursorPos(third+2,4)
+    monitor.write("COMBAT")
+
+
+    monitor.setCursorPos(third*2+2,4)
+    monitor.write("PROTOCOLS")
+
+
 end
 
-local function commandStatus()
-    fix(12, 4)
-    monitor.setTextColor(colors.white)
-    print("Defcon:")
+
+
+local function drawStatus()
+
+
+    monitor.setCursorPos(2,6)
+
+    monitor.write(
+        "Elevator:"
+    )
+
+
+    monitor.setCursorPos(2,7)
+
+    monitor.write(
+        systems.elevator.status
+    )
+
+
+
+    monitor.setCursorPos(2,9)
+
+    monitor.write(
+        "Power:"
+    )
+
+
+    monitor.setCursorPos(2,10)
+
+    monitor.write(
+        systems.power.status
+    )
+
+
+
+    monitor.setCursorPos(2,12)
+
+    monitor.write(
+        "Fuel:"
+    )
+
+
+    monitor.setCursorPos(2,13)
+
+    monitor.write(
+        systems.fuel.status
+    )
+
+
 end
+
+
+
+local function updateScreen()
+
+    clearMonitor()
+
+    drawHeader()
+
+    drawColumns()
+
+    drawStatus()
+
+end
+
+local function handlePacket(packet)
+
+
+    if packet.system then
+
+
+        if systems[packet.system] then
+
+            systems[packet.system] =
+                packet.data
+
+        else
+
+            systems[packet.system] =
+            {
+                status = "ONLINE"
+            }
+
+        end
+
+
+    end
+
+
+end
+
+updateScreen()
+
 
 while true do
-    setupBoard()
-    sleep(updateTime)
+
+
+    local event,
+          side,
+          ch,
+          reply,
+          message =
+          os.pullEvent("modem_message")
+
+
+
+    if ch == channel then
+
+
+        handlePacket(message)
+
+        updateScreen()
+
+
+    end
+
+
 end
