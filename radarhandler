@@ -1,4 +1,4 @@
--- Tactical Radar V3
+-- Tactical Radar V4
 -- CC:Tweaked + Advanced Peripherals Player Detector
 
 
@@ -28,24 +28,24 @@ monitor.setTextScale(0.5)
 local w,h = monitor.getSize()
 
 
-
-local originX = 0
-local originZ = 0
-
-
-local detectionRange = 1000
+local origin = {
+    x = 0,
+    z = 0
+}
 
 
-local zoom = 200
+local MAX_DETECTION_RANGE = 192
 
 
 local zoomLevels = {
+    25,
     50,
     100,
-    200,
-    400,
-    800
+    192
 }
+
+
+local zoom = 192
 
 
 
@@ -56,10 +56,12 @@ local zoomLevels = {
 
 local sweepAngle = 0
 
+local oldContacts = {}
+
 
 
 ------------------------------------------------
--- DRAW HELPERS
+-- HELPERS
 ------------------------------------------------
 
 
@@ -85,12 +87,10 @@ end
 
 
 
-local function fillBackground()
+local function clearArea()
 
 
     monitor.setBackgroundColor(colors.black)
-
-    monitor.setTextColor(colors.black)
 
 
     for y=1,h do
@@ -108,8 +108,22 @@ end
 
 
 
+
+local function distance(x,z)
+
+    return math.floor(
+        math.sqrt(
+            x*x + z*z
+        )
+    )
+
+end
+
+
+
+
 ------------------------------------------------
--- COORDINATE MATH
+-- POSITION CONVERSION
 ------------------------------------------------
 
 
@@ -128,6 +142,7 @@ local function worldToRadar(x,z)
         )
 
 
+    -- compensate monitor character ratio
 
     local ry =
         math.floor(
@@ -142,30 +157,20 @@ end
 
 
 
-local function distance(x,z)
-
-    return math.sqrt(
-        x*x+z*z
-    )
-
-end
-
-
-
 ------------------------------------------------
--- RADAR DRAWING
+-- DRAWING
 ------------------------------------------------
 
 
 local function drawGrid()
 
 
-    for y=3,h-2 do
+    for y=2,h-3 do
 
         for x=1,w do
 
 
-            if x%4==0 and y%3==0 then
+            if x%5==0 and y%3==0 then
 
                 write(
                     x,
@@ -188,45 +193,33 @@ end
 
 
 
-local function drawRadarCircle()
+local function drawRangeCircle()
 
 
     local radius =
-        detectionRange *
-        ((w/2)/zoom)
-
-
-
-    -- If range is outside zoom,
-    -- draw the edge of screen instead
-
-    if radius > w/2 then
-        radius = w/2
-    end
+        (w/2)
 
 
 
     for angle=0,360,3 do
 
 
-        local r =
+        local rad =
             math.rad(angle)
-
 
 
         local x =
             math.floor(
                 w/2 +
-                math.cos(r)*radius
+                math.cos(rad)*radius
             )
 
 
         local y =
             math.floor(
                 h/2 +
-                math.sin(r)*radius*0.5
+                math.sin(rad)*radius*0.5
             )
-
 
 
         write(
@@ -245,10 +238,9 @@ end
 
 
 
+
 local function drawCompass()
 
-
-    -- edges of screen
 
     write(
         math.floor(w/2),
@@ -260,7 +252,7 @@ local function drawCompass()
 
     write(
         math.floor(w/2),
-        h,
+        h-1,
         "S",
         colors.white
     )
@@ -328,14 +320,14 @@ local function drawSweep()
 
         local x =
             math.floor(
-                w/2+
+                w/2 +
                 math.cos(r)*i
             )
 
 
         local y =
             math.floor(
-                h/2-
+                h/2 -
                 math.sin(r)*i*0.5
             )
 
@@ -360,12 +352,12 @@ local function updateSweep()
 
 
     sweepAngle =
-        sweepAngle+4
+        sweepAngle + 3
 
 
-    if sweepAngle>=360 then
+    if sweepAngle >= 360 then
 
-        sweepAngle=0
+        sweepAngle = 0
 
     end
 
@@ -375,19 +367,20 @@ end
 
 
 ------------------------------------------------
--- CONTACTS
+-- PLAYER CONTACTS
 ------------------------------------------------
 
 
 local function getContacts()
 
 
-    local contacts={}
+    local contacts = {}
+
 
 
     local players =
         detector.getPlayersInRange(
-            detectionRange
+            MAX_DETECTION_RANGE
         )
 
 
@@ -395,35 +388,39 @@ local function getContacts()
     for _,name in ipairs(players) do
 
 
-        local pos =
-            detector.getPlayerPos(name)
+
+        if detector.isPlayerInRange(
+            name,
+            MAX_DETECTION_RANGE
+        ) then
 
 
 
-        if pos then
+            local pos =
+                detector.getPlayerPos(name)
 
 
-            table.insert(
-                contacts,
-                {
+
+            if pos then
 
 
-                    type="PL",
+                table.insert(
+                    contacts,
+                    {
+
+                        name=name,
+
+                        x=
+                        pos.x-origin.x,
+
+                        z=
+                        pos.z-origin.z
+
+                    }
+                )
 
 
-                    name=name,
-
-
-                    x=
-                    pos.x-originX,
-
-
-                    z=
-                    pos.z-originZ
-
-
-                }
-            )
+            end
 
 
         end
@@ -444,14 +441,20 @@ end
 local function drawContacts()
 
 
-    for _,c in ipairs(getContacts()) do
+    local contacts =
+        getContacts()
+
+
+
+    for _,p in ipairs(contacts) do
 
 
         local x,y =
             worldToRadar(
-                c.x,
-                c.z
+                p.x,
+                p.z
             )
+
 
 
         if x>=1 and x<=w and y>=1 and y<=h then
@@ -468,8 +471,16 @@ local function drawContacts()
             write(
                 x+2,
                 y,
-                c.type.." "..c.name,
+                "PL "..p.name,
                 colors.green
+            )
+
+
+            write(
+                x+2,
+                y+1,
+                distance(p.x,p.z).."m",
+                colors.lightGray
             )
 
 
@@ -484,24 +495,17 @@ end
 
 
 ------------------------------------------------
--- BUTTONS
+-- UI
 ------------------------------------------------
 
 
 local function drawButtons()
 
 
-    local text =
-        "[-]  "..zoom.."m  [+]"
-
-
     write(
-        math.floor(
-            w/2-
-            #text/2
-        ),
+        2,
         h,
-        text,
+        "[-] "..zoom.."m [+]",
         colors.white
     )
 
@@ -510,6 +514,10 @@ end
 
 
 
+
+------------------------------------------------
+-- INPUT
+------------------------------------------------
 
 
 local function buttonLoop()
@@ -525,37 +533,15 @@ local function buttonLoop()
 
 
 
-        if y==h then
+        if y == h then
 
 
-            if x < w/2 then
-
-
-                for i,v in ipairs(zoomLevels) do
-
-                    if v==zoom then
-
-                        zoom =
-                        zoomLevels[
-                            math.min(
-                                i+1,
-                                #zoomLevels
-                            )
-                        ]
-
-                        break
-
-                    end
-
-                end
-
-
-            else
+            if x <= 8 then
 
 
                 for i,v in ipairs(zoomLevels) do
 
-                    if v==zoom then
+                    if v == zoom then
 
 
                         zoom =
@@ -570,6 +556,29 @@ local function buttonLoop()
 
                     end
 
+                end
+
+
+
+            elseif x >= 12 then
+
+
+                for i,v in ipairs(zoomLevels) do
+
+                    if v == zoom then
+
+
+                        zoom =
+                        zoomLevels[
+                            math.min(
+                                i+1,
+                                #zoomLevels
+                            )
+                        ]
+
+                        break
+
+                    end
 
                 end
 
@@ -587,8 +596,9 @@ end
 
 
 
+
 ------------------------------------------------
--- MAIN LOOP
+-- RADAR LOOP
 ------------------------------------------------
 
 
@@ -598,42 +608,34 @@ local function radarLoop()
     while true do
 
 
-        fillBackground()
+        clearArea()
 
 
         drawGrid()
 
-
-        drawRadarCircle()
-
+        drawRangeCircle()
 
         drawSweep()
 
-
         drawCompass()
-
 
         drawCenter()
 
-
         drawContacts()
 
-
         drawButtons()
-
 
 
         updateSweep()
 
 
-        sleep(0.1)
+        sleep(0.15)
 
 
     end
 
 
 end
-
 
 
 
