@@ -140,85 +140,27 @@ end
 
 function drawPlayers()
 
+    local players = detector.getPlayersInRange(RANGE)
 
-    local players =
-        detector.getPlayers()
+    for _, name in ipairs(players) do
 
-
-
-    for _,name in pairs(players) do
-
-
-
-        local pos =
-            detector.getPlayerPos(name)
-
-
+        local pos = detector.getPlayerPos(name)
 
         if pos then
 
+            local relativeX = pos.x - originX
+            local relativeZ = pos.z - originZ
 
-            local relativeX =
-                pos.x - originX
+            local x, y = convertPosition(relativeX, relativeZ)
 
+            if x >= 1 and x <= w and y >= 1 and y <= h then
 
-            local relativeZ =
-                pos.z - originZ
+                monitor.setCursorPos(x, y)
+                monitor.setTextColor(colors.green)
+                monitor.write("+")
 
-
-
-            local distance =
-                math.sqrt(
-                    relativeX^2 +
-                    relativeZ^2
-                )
-
-
-
-            if distance <= RANGE then
-
-
-
-                local x,y =
-                    convertPosition(
-                        relativeX,
-                        relativeZ
-                    )
-
-
-
-                if x>1 and x<w
-                and y>1 and y<h then
-
-
-
-                    monitor.setTextColor(
-                        colors.green
-                    )
-
-
-                    monitor.setCursorPos(
-                        x,
-                        y
-                    )
-
-                    monitor.write("+")
-                    
-
-
-                    monitor.setCursorPos(
-                        x+2,
-                        y
-                    )
-
-
-                    monitor.write(
-                        "PL "..name
-                    )
-
-
-
-                end
+                monitor.setCursorPos(math.min(x + 2, w), y)
+                monitor.write("PL " .. name)
 
             end
 
