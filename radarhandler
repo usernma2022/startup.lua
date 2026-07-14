@@ -1,4 +1,4 @@
--- Tactical Radar V6
+-- Tactical Radar V7
 -- CC:Tweaked + Advanced Peripherals Player Detector
 
 
@@ -12,8 +12,9 @@ end
 
 
 if not detector then
-    error("Player detector missing")
+    error("Player Detector missing")
 end
+
 
 
 ------------------------------------------------
@@ -27,24 +28,32 @@ monitor.setTextScale(0.5)
 local w,h = monitor.getSize()
 
 
-local origin = {
-    x = 0,
-    z = 0
-}
+
+-- Actual sensor limit
+local DETECTOR_RANGE = 192
 
 
-local MAX_RANGE = 192
 
-
+-- Display range
 local zoomLevels = {
     25,
     50,
     100,
-    192
+    192,
+    256,
+    512,
+    1024
 }
 
 
 local zoom = 192
+
+
+
+local origin = {
+    x = 0,
+    z = 0
+}
 
 
 
@@ -55,7 +64,6 @@ local zoom = 192
 
 local sweepAngle = 0
 
-
 local contacts = {}
 
 local oldContacts = {}
@@ -63,7 +71,7 @@ local oldContacts = {}
 
 
 ------------------------------------------------
--- HELPERS
+-- DRAW HELPERS
 ------------------------------------------------
 
 
@@ -91,17 +99,23 @@ end
 
 local function erase(x,y,length)
 
+
+    if x < 1 or x > w or y < 1 or y > h then
+        return
+    end
+
+
     monitor.setCursorPos(
         math.floor(x),
         math.floor(y)
     )
+
 
     monitor.write(
         string.rep(" ",length)
     )
 
 end
-
 
 
 
@@ -141,12 +155,10 @@ local function worldToRadar(x,z)
         )
 
 
-
     local ry =
         math.floor(
             h/2-z*scaleY
         )
-
 
 
     return rx,ry
@@ -155,13 +167,12 @@ end
 
 
 
-
 ------------------------------------------------
--- STATIC DRAW
+-- STATIC RADAR
 ------------------------------------------------
 
 
-local function drawBackground()
+local function drawStatic()
 
 
     monitor.setBackgroundColor(colors.black)
@@ -170,7 +181,7 @@ local function drawBackground()
 
 
 
-    -- grid
+    -- Grid
 
     for y=2,h-2 do
 
@@ -188,13 +199,15 @@ local function drawBackground()
 
             end
 
+
         end
 
     end
 
 
 
-    -- circle
+
+    -- Range circle
 
 
     for angle=0,360,3 do
@@ -218,7 +231,6 @@ local function drawBackground()
             )
 
 
-
         write(
             x,
             y,
@@ -231,7 +243,8 @@ local function drawBackground()
 
 
 
-    -- compass
+
+    -- Compass
 
 
     write(
@@ -244,7 +257,7 @@ local function drawBackground()
 
     write(
         math.floor(w/2),
-        h-1,
+        h,
         "S",
         colors.white
     )
@@ -274,6 +287,7 @@ local function drawBackground()
         colors.cyan
     )
 
+
 end
 
 
@@ -286,21 +300,12 @@ end
 local function drawSweep()
 
 
-    local centerX =
-        w/2
-
-
-    local centerY =
-        h/2
-
-
-
     local length =
         math.min(w,h)/2
 
 
 
-    local spread = 12
+    local spread = 15
 
 
 
@@ -319,17 +324,16 @@ local function drawSweep()
 
             local x =
                 math.floor(
-                    centerX+
+                    w/2+
                     math.cos(angle)*i
                 )
 
 
             local y =
                 math.floor(
-                    centerY+
+                    h/2+
                     math.sin(angle)*i
                 )
-
 
 
             write(
@@ -341,6 +345,7 @@ local function drawSweep()
 
 
         end
+
 
     end
 
@@ -354,7 +359,7 @@ local function updateSweep()
 
 
     sweepAngle =
-        sweepAngle+5
+        sweepAngle+4
 
 
     if sweepAngle>=360 then
@@ -363,12 +368,13 @@ local function updateSweep()
 
     end
 
+
 end
 
 
 
 ------------------------------------------------
--- PLAYERS
+-- PLAYER SENSOR
 ------------------------------------------------
 
 
@@ -378,20 +384,22 @@ local function scanPlayers()
     local result={}
 
 
-    local list =
+
+    local players =
         detector.getPlayersInRange(
-            MAX_RANGE
+            DETECTOR_RANGE
         )
 
 
 
-    for _,name in ipairs(list) do
+    for _,name in ipairs(players) do
 
 
         if detector.isPlayerInRange(
-            MAX_RANGE,
+            DETECTOR_RANGE,
             name
         ) then
+
 
 
             local pos =
@@ -405,6 +413,9 @@ local function scanPlayers()
                 table.insert(
                     result,
                     {
+
+
+                        type="PL",
 
 
                         name=name,
@@ -424,9 +435,12 @@ local function scanPlayers()
 
             end
 
+
         end
 
+
     end
+
 
 
     return result
@@ -434,6 +448,11 @@ local function scanPlayers()
 end
 
 
+
+
+------------------------------------------------
+-- CONTACT DRAWING
+------------------------------------------------
 
 
 local function eraseOldContacts()
@@ -457,15 +476,16 @@ local function eraseOldContacts()
 
 
         erase(
-            x+2,
+            x,
             y+1,
             10
         )
 
+
     end
 
-end
 
+end
 
 
 
@@ -489,7 +509,9 @@ local function drawContacts()
 
 
 
-        if x>1 and x<w and y>2 and y<h-2 then
+        if x>=1 and x<=w
+        and y>=2 and y<=h-2 then
+
 
 
             write(
@@ -502,7 +524,6 @@ local function drawContacts()
 
 
             local labelX=x+2
-
 
 
             if labelX+10>w then
@@ -524,7 +545,10 @@ local function drawContacts()
             write(
                 labelX,
                 y+1,
-                distance(p.x,p.z).."m",
+                distance(
+                    p.x,
+                    p.z
+                ).."m",
                 colors.lightGray
             )
 
@@ -548,30 +572,6 @@ end
 ------------------------------------------------
 
 
-local function getButtons()
-
-
-    return {
-
-        out = {
-            x1=2,
-            x2=6
-        },
-
-
-        in = {
-            x1=10,
-            x2=14
-        }
-
-    }
-
-end
-
-
-
-
-
 local function drawButtons()
 
 
@@ -592,7 +592,7 @@ local function drawButtons()
 
 
     write(
-        10,
+        14,
         h,
         "[+]",
         colors.white
@@ -619,14 +619,19 @@ local function changeZoom(amount)
 
 
 
-            new =
-                math.max(
-                    1,
-                    math.min(
-                        new,
-                        #zoomLevels
-                    )
-                )
+            if new < 1 then
+
+                new=1
+
+            end
+
+
+
+            if new>#zoomLevels then
+
+                new=#zoomLevels
+
+            end
 
 
 
@@ -634,7 +639,7 @@ local function changeZoom(amount)
                 zoomLevels[new]
 
 
-            drawBackground()
+            drawStatic()
 
 
             return
@@ -664,35 +669,32 @@ local function buttonLoop()
 
 
 
-        local b =
-            getButtons()
-
-
-
         if y==h then
 
 
-            if x>=b.out.x1
-            and x<=b.out.x2 then
+
+            if x>=2 and x<=4 then
 
 
                 changeZoom(-1)
 
 
 
-            elseif x>=b.in.x1
-            and x<=b.in.x2 then
+            elseif x>=14 and x<=16 then
 
 
                 changeZoom(1)
 
 
+
             end
+
 
         end
 
 
     end
+
 
 end
 
@@ -706,10 +708,12 @@ end
 local function radarLoop()
 
 
-    drawBackground()
+    drawStatic()
+
 
 
     while true do
+
 
 
         eraseOldContacts()
@@ -721,7 +725,8 @@ local function radarLoop()
         sleep(0.05)
 
 
-        drawBackground()
+
+        drawStatic()
 
 
         drawSweep()
@@ -742,8 +747,8 @@ local function radarLoop()
 
     end
 
-end
 
+end
 
 
 
