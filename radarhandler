@@ -18,42 +18,111 @@ local buffer = window.create(monitor,1,1,w,h)
 
 local sweepAngle = 0
 
+local knownPlayers = {}
+local alarm = false
+
+
+redstone.setOutput("right",false)
+
+
 local function write(t,x,y,text,color)
     if x<1 or x>w or y<1 or y>h then return end
+
     t.setCursorPos(math.floor(x),math.floor(y))
     t.setTextColor(color)
     t.write(text)
 end
 
+
 local function distance(x,z)
     return math.floor(math.sqrt(x*x+z*z))
 end
+
 
 local function worldToRadar(x,z)
     return math.floor(w/2+x*(w/2)/zoom),
            math.floor(h/2-z*(h/2)/zoom)
 end
 
+
 local function radarRadius()
     return RADAR_RANGE*(w/2)/zoom
 end
 
-local function drawBackground()
-    buffer.setBackgroundColor(colors.black)
-    buffer.clear()
 
-    for y=2,h-2 do
-        for x=1,w do
-            if x%5==0 and y%3==0 then
-                write(buffer,x,y,".",colors.gray)
-            end
+local function checkPlayers()
+
+    local players = detector.getPlayersInRange(RADAR_RANGE)
+
+    for _,name in ipairs(players) do
+
+        if not knownPlayers[name] then
+
+            knownPlayers[name]=true
+            alarm=true
+            redstone.setOutput("right",true)
+
         end
     end
 
-    local r = radarRadius()
+
+    -- remove players who left
+    for name,_ in pairs(knownPlayers) do
+
+        local exists=false
+
+        for _,p in ipairs(players) do
+            if p==name then
+                exists=true
+            end
+        end
+
+        if not exists then
+            knownPlayers[name]=nil
+        end
+    end
+end
+
+
+local function acknowledge()
+
+    local players = detector.getPlayersInRange(RADAR_RANGE)
+
+    for _,name in ipairs(players) do
+        knownPlayers[name]=true
+    end
+
+    alarm=false
+    redstone.setOutput("right",false)
+
+end
+
+
+
+local function drawBackground()
+
+    buffer.setBackgroundColor(colors.black)
+    buffer.clear()
+
+
+    for y=2,h-2 do
+        for x=1,w do
+
+            if x%5==0 and y%3==0 then
+                write(buffer,x,y,".",colors.gray)
+            end
+
+        end
+    end
+
+
+    local r=radarRadius()
+
 
     for a=0,360,3 do
+
         local rad=math.rad(a)
+
         write(
             buffer,
             w/2+math.cos(rad)*r,
@@ -61,22 +130,29 @@ local function drawBackground()
             ".",
             colors.lightBlue
         )
+
     end
+
 
     write(buffer,w/2,1,"N",colors.white)
     write(buffer,w/2,h,"S",colors.white)
     write(buffer,1,h/2,"W",colors.white)
     write(buffer,w,h/2,"E",colors.white)
-    write(buffer,w/2,h/2,"+",colors.cyan)
+
 end
 
+
+
 local function drawSweep()
+
     local r=radarRadius()
 
     for offset=-15,15,2 do
+
         local a=math.rad(sweepAngle+offset)
 
         for i=1,r do
+
             local ratio=i/r
 
             write(
@@ -86,19 +162,21 @@ local function drawSweep()
                 ".",
                 colors.green
             )
+
         end
     end
 end
 
-local function updateSweep()
-    sweepAngle=(sweepAngle+4)%360
-end
+
 
 local function drawPlayers()
+
     for _,name in ipairs(detector.getPlayersInRange(RADAR_RANGE)) do
+
         local pos=detector.getPlayerPos(name)
 
         if pos then
+
             local x=pos.x-origin.x
             local z=pos.z-origin.z
 
@@ -106,73 +184,133 @@ local function drawPlayers()
 
             if sx>=1 and sx<=w and sy>=2 and sy<=h-2 then
 
-                write(buffer,sx,sy,"+",colors.green)
+                write(
+                    buffer,
+                    sx,
+                    sy,
+                    "+",
+                    colors.green
+                )
 
-                local lx=sx+2
-                if lx+12>w then lx=sx-12 end
-
-                write(buffer,lx,sy,"PL ",colors.green)
-
-                buffer.setCursorPos(lx+3,sy)
-                buffer.setTextColor(colors.white)
-                buffer.write(name)
 
                 write(
                     buffer,
-                    lx,
-                    sy+1,
-                    distance(x,z).."m",
-                    colors.lightGray
+                    sx+2,
+                    sy,
+                    name,
+                    colors.white
                 )
+
             end
         end
     end
 end
 
+
+
 local function drawUI()
+
     write(buffer,2,h,"[-]",colors.white)
     write(buffer,6,h,zoom.."m",colors.white)
     write(buffer,14,h,"[+]",colors.white)
+
+    write(
+        buffer,
+        w-5,
+        h,
+        "[ACK]",
+        alarm and colors.red or colors.gray
+    )
+
 end
 
+
+
 local function render()
+
     drawBackground()
     drawSweep()
     drawPlayers()
     drawUI()
+
     buffer.redraw()
+
 end
 
+
+
+local function updateSweep()
+    sweepAngle=(sweepAngle+4)%360
+end
+
+
+
 local function changeZoom(amount)
+
     for i,v in ipairs(zoomLevels) do
+
         if v==zoom then
-            zoom=zoomLevels[math.max(1,math.min(i+amount,#zoomLevels))]
+
+            zoom=zoomLevels[
+                math.max(
+                    1,
+                    math.min(
+                        i+amount,
+                        #zoomLevels
+                    )
+                )
+            ]
+
             return
         end
     end
 end
 
+
+
 local function buttonLoop()
+
     while true do
+
         local _,_,x,y=os.pullEvent("monitor_touch")
 
+
         if y==h then
+
             if x>=2 and x<=4 then
                 changeZoom(-1)
+
             elseif x>=14 and x<=16 then
                 changeZoom(1)
+
+            elseif x>=w-5 then
+                acknowledge()
+
             end
+
         end
     end
 end
 
+
+
 parallel.waitForAny(
+
     buttonLoop,
+
     function()
+
         while true do
+
+            checkPlayers()
+
             render()
+
             updateSweep()
+
             sleep(0.15)
+
         end
+
     end
 )
