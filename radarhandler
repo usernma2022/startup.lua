@@ -1,5 +1,6 @@
--- Tactical Radar V8
+-- Tactical Radar V9
 -- CC:Tweaked + Advanced Peripherals Player Detector
+-- Layered rendering version
 
 
 local monitor = peripheral.find("monitor")
@@ -29,12 +30,10 @@ local w,h = monitor.getSize()
 
 
 
--- REAL SENSOR RANGE
 local RADAR_RANGE = 192
 
 
 
--- DISPLAY SCALE
 local zoomLevels = {
     64,
     96,
@@ -58,13 +57,61 @@ local origin = {
 
 
 ------------------------------------------------
+-- WINDOWS
+------------------------------------------------
+
+
+local background =
+    window.create(
+        monitor,
+        1,
+        1,
+        w,
+        h,
+        true
+    )
+
+
+local sweepWindow =
+    window.create(
+        monitor,
+        1,
+        1,
+        w,
+        h,
+        true
+    )
+
+
+local contactWindow =
+    window.create(
+        monitor,
+        1,
+        1,
+        w,
+        h,
+        true
+    )
+
+
+local uiWindow =
+    window.create(
+        monitor,
+        1,
+        1,
+        w,
+        h,
+        true
+    )
+
+
+
+------------------------------------------------
 -- STATE
 ------------------------------------------------
 
 
 local sweepAngle = 0
-
-local oldContacts = {}
 
 
 
@@ -73,54 +120,26 @@ local oldContacts = {}
 ------------------------------------------------
 
 
-local function write(x,y,text,color)
-
-
-    if x < 1 or x > w or y < 1 or y > h then
-        return
-    end
-
-
-    monitor.setCursorPos(
-        math.floor(x),
-        math.floor(y)
-    )
-
-
-    monitor.setTextColor(color)
-
-    monitor.write(text)
-
-end
-
-
-
-
-local function erase(x,y,length)
-
+local function write(win,x,y,text,color)
 
     if x < 1 or x > w or y < 1 or y > h then
         return
     end
 
 
-    monitor.setCursorPos(
+    win.setCursorPos(
         math.floor(x),
         math.floor(y)
     )
 
 
-    monitor.write(
-        string.rep(" ",length)
-    )
+    win.setTextColor(color)
+
+    win.write(text)
 
 end
 
 
-
-------------------------------------------------
--- MATH
-------------------------------------------------
 
 
 local function distance(x,z)
@@ -134,6 +153,10 @@ local function distance(x,z)
 end
 
 
+
+------------------------------------------------
+-- MATH
+------------------------------------------------
 
 
 local function worldToRadar(x,z)
@@ -163,6 +186,7 @@ end
 
 
 
+
 local function radarRadius()
 
 
@@ -175,16 +199,16 @@ end
 
 
 ------------------------------------------------
--- STATIC DISPLAY
+-- BACKGROUND
 ------------------------------------------------
 
 
-local function drawStatic()
+local function drawBackground()
 
 
-    monitor.setBackgroundColor(colors.black)
+    background.setBackgroundColor(colors.black)
 
-    monitor.clear()
+    background.clear()
 
 
 
@@ -198,6 +222,7 @@ local function drawStatic()
             if x%5==0 and y%3==0 then
 
                 write(
+                    background,
                     x,
                     y,
                     ".",
@@ -221,10 +246,8 @@ local function drawStatic()
         radarRadius()
 
 
-
     local yRadius =
-        radius *
-        (h/w)
+        radius*(h/w)
 
 
 
@@ -243,7 +266,6 @@ local function drawStatic()
             )
 
 
-
         local y =
             math.floor(
                 h/2+
@@ -251,12 +273,12 @@ local function drawStatic()
             )
 
 
-
         write(
+            background,
             x,
             y,
             ".",
-            colors.blue
+            colors.lightBlue
         )
 
 
@@ -269,6 +291,7 @@ local function drawStatic()
 
 
     write(
+        background,
         math.floor(w/2),
         1,
         "N",
@@ -277,6 +300,7 @@ local function drawStatic()
 
 
     write(
+        background,
         math.floor(w/2),
         h,
         "S",
@@ -285,6 +309,7 @@ local function drawStatic()
 
 
     write(
+        background,
         1,
         math.floor(h/2),
         "W",
@@ -293,6 +318,7 @@ local function drawStatic()
 
 
     write(
+        background,
         w,
         math.floor(h/2),
         "E",
@@ -302,12 +328,12 @@ local function drawStatic()
 
 
     write(
+        background,
         math.floor(w/2),
         math.floor(h/2),
         "+",
         colors.cyan
     )
-
 
 end
 
@@ -319,6 +345,10 @@ end
 
 
 local function drawSweep()
+
+
+    sweepWindow.clear()
+
 
 
     local radius =
@@ -356,23 +386,25 @@ local function drawSweep()
             local x =
                 math.floor(
                     w/2+
-                    math.cos(angle)*
-                    radius*
-                    ratio
+                    math.cos(angle)
+                    *radius
+                    *ratio
                 )
+
 
 
             local y =
                 math.floor(
                     h/2+
-                    math.sin(angle)*
-                    yRadius*
-                    ratio
+                    math.sin(angle)
+                    *yRadius
+                    *ratio
                 )
 
 
 
             write(
+                sweepWindow,
                 x,
                 y,
                 ".",
@@ -398,27 +430,25 @@ local function updateSweep()
         sweepAngle+4
 
 
-
     if sweepAngle>=360 then
 
         sweepAngle=0
 
     end
 
-
 end
 
 
 
 ------------------------------------------------
--- PLAYER SCANNER
+-- CONTACTS
 ------------------------------------------------
 
 
-local function scanPlayers()
+local function drawContacts()
 
 
-    local contacts={}
+    contactWindow.clear()
 
 
 
@@ -430,7 +460,6 @@ local function scanPlayers()
 
 
     for _,name in ipairs(players) do
-
 
 
         if detector.isPlayerInRange(
@@ -448,102 +477,90 @@ local function scanPlayers()
             if pos then
 
 
-                table.insert(
-                    contacts,
-                    {
+                local x,z =
+                    pos.x-origin.x,
+                    pos.z-origin.z
 
-                        name=name,
 
-                        x=
-                        pos.x-origin.x,
 
-                        z=
-                        pos.z-origin.z
+                local sx,sy =
+                    worldToRadar(
+                        x,
+                        z
+                    )
 
-                    }
-                )
+
+
+                if sx>=1 and sx<=w
+                and sy>=2 and sy<=h-2 then
+
+
+
+                    write(
+                        contactWindow,
+                        sx,
+                        sy,
+                        "+",
+                        colors.green
+                    )
+
+
+
+                    local labelX =
+                        sx+2
+
+
+
+                    if labelX+12>w then
+
+                        labelX=sx-12
+
+                    end
+
+
+
+                    -- PL green
+
+                    contactWindow.setCursorPos(
+                        labelX,
+                        sy
+                    )
+
+                    contactWindow.setTextColor(
+                        colors.green
+                    )
+
+                    contactWindow.write(
+                        "PL "
+                    )
+
+
+
+                    -- Name white
+
+                    contactWindow.setTextColor(
+                        colors.white
+                    )
+
+                    contactWindow.write(
+                        name
+                    )
+
+
+
+                    write(
+                        contactWindow,
+                        labelX,
+                        sy+1,
+                        distance(x,z).."m",
+                        colors.lightGray
+                    )
+
+
+                end
 
 
             end
-
-
-        end
-
-
-    end
-
-
-
-    return contacts
-
-end
-
-
-
-
-local function drawContacts()
-
-
-    local contacts =
-        scanPlayers()
-
-
-
-    for _,p in ipairs(contacts) do
-
-
-        local x,y =
-            worldToRadar(
-                p.x,
-                p.z
-            )
-
-
-
-        if x>=1 and x<=w
-        and y>=2 and y<=h-2 then
-
-
-
-            write(
-                x,
-                y,
-                "+",
-                colors.green
-            )
-
-
-
-            local labelX =
-                x+2
-
-
-
-            if labelX+12>w then
-
-                labelX=x-12
-
-            end
-
-
-
-            write(
-                labelX,
-                y,
-                "PL "..p.name,
-                colors.green
-            )
-
-
-            write(
-                labelX,
-                y+1,
-                distance(
-                    p.x,
-                    p.z
-                ).."m",
-                colors.lightGray
-            )
 
 
         end
@@ -557,14 +574,19 @@ end
 
 
 ------------------------------------------------
--- BUTTONS
+-- UI
 ------------------------------------------------
 
 
-local function drawButtons()
+local function drawUI()
+
+
+    uiWindow.clear()
+
 
 
     write(
+        uiWindow,
         2,
         h,
         "[-]",
@@ -573,6 +595,7 @@ local function drawButtons()
 
 
     write(
+        uiWindow,
         6,
         h,
         zoom.."m",
@@ -581,6 +604,7 @@ local function drawButtons()
 
 
     write(
+        uiWindow,
         14,
         h,
         "[+]",
@@ -592,6 +616,10 @@ end
 
 
 
+------------------------------------------------
+-- BUTTONS
+------------------------------------------------
+
 
 local function changeZoom(amount)
 
@@ -602,16 +630,16 @@ local function changeZoom(amount)
         if v==zoom then
 
 
-            local new =
+            local index =
                 i+amount
 
 
 
-            new =
+            index =
                 math.max(
                     1,
                     math.min(
-                        new,
+                        index,
                         #zoomLevels
                     )
                 )
@@ -619,7 +647,13 @@ local function changeZoom(amount)
 
 
             zoom =
-                zoomLevels[new]
+                zoomLevels[index]
+
+
+
+            drawBackground()
+
+            drawUI()
 
 
             return
@@ -678,39 +712,39 @@ end
 ------------------------------------------------
 
 
-local function radarLoop()
+drawBackground()
+
+drawUI()
 
 
-    while true do
+while true do
 
 
-        drawStatic()
+    parallel.waitForAny(
+
+        buttonLoop,
 
 
-        drawSweep()
+        function()
 
 
-        drawContacts()
+            while true do
 
 
-        drawButtons()
+                drawSweep()
+
+                drawContacts()
+
+                updateSweep()
+
+                sleep(0.15)
 
 
-        updateSweep()
+            end
 
 
-        sleep(0.15)
+        end
 
-
-    end
-
+    )
 
 end
-
-
-
-
-parallel.waitForAny(
-    radarLoop,
-    buttonLoop
-)
