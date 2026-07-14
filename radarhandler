@@ -1,4 +1,4 @@
--- Tactical Radar V2
+-- Tactical Radar V3
 -- CC:Tweaked + Advanced Peripherals Player Detector
 
 
@@ -29,30 +29,22 @@ local w,h = monitor.getSize()
 
 
 
-local config = {
+local originX = 0
+local originZ = 0
 
 
-    origin = {
-        x = 0,
-        z = 0
-    },
+local detectionRange = 1000
 
 
-    detectionRange = 1000,
+local zoom = 200
 
 
-    zoom = 200,
-
-
-    zoomLevels = {
-        50,
-        100,
-        200,
-        400,
-        800
-    }
-
-
+local zoomLevels = {
+    50,
+    100,
+    200,
+    400,
+    800
 }
 
 
@@ -67,39 +59,80 @@ local sweepAngle = 0
 
 
 ------------------------------------------------
--- MATH
+-- DRAW HELPERS
 ------------------------------------------------
 
 
-local function distance(x,z)
+local function write(x,y,text,color)
 
-    return math.sqrt(
-        x*x + z*z
+    if x < 1 or x > w or y < 1 or y > h then
+        return
+    end
+
+
+    monitor.setCursorPos(
+        math.floor(x),
+        math.floor(y)
     )
+
+
+    monitor.setTextColor(color)
+
+    monitor.write(text)
 
 end
 
+
+
+
+local function fillBackground()
+
+
+    monitor.setBackgroundColor(colors.black)
+
+    monitor.setTextColor(colors.black)
+
+
+    for y=1,h do
+
+        monitor.setCursorPos(1,y)
+
+        monitor.write(
+            string.rep(" ",w)
+        )
+
+    end
+
+
+end
+
+
+
+------------------------------------------------
+-- COORDINATE MATH
+------------------------------------------------
 
 
 local function worldToRadar(x,z)
 
 
     local scale =
-        (w/2) /
-        config.zoom
+        (w/2)/zoom
+
 
 
     local rx =
         math.floor(
             w/2 +
-            x * scale
+            x*scale
         )
+
 
 
     local ry =
         math.floor(
             h/2 -
-            z * scale
+            z*scale*0.5
         )
 
 
@@ -109,59 +142,45 @@ end
 
 
 
-------------------------------------------------
--- DRAWING
-------------------------------------------------
+local function distance(x,z)
 
-
-
-local function clear()
-
-    monitor.setBackgroundColor(colors.black)
-
-    monitor.clear()
+    return math.sqrt(
+        x*x+z*z
+    )
 
 end
 
 
 
-
-local function text(x,y,msg,color)
-
-    monitor.setCursorPos(x,y)
-
-    monitor.setTextColor(color)
-
-    monitor.write(msg)
-
-end
-
-
+------------------------------------------------
+-- RADAR DRAWING
+------------------------------------------------
 
 
 local function drawGrid()
 
 
-    monitor.setTextColor(colors.gray)
-
-
-    for y=2,h-2 do
+    for y=3,h-2 do
 
         for x=1,w do
 
 
             if x%4==0 and y%3==0 then
 
-                monitor.setCursorPos(x,y)
-
-                monitor.write(".")
-
+                write(
+                    x,
+                    y,
+                    ".",
+                    colors.gray
+                )
 
             end
+
 
         end
 
     end
+
 
 end
 
@@ -169,19 +188,28 @@ end
 
 
 
-local function drawRing(range)
+local function drawRadarCircle()
 
 
     local radius =
-        range *
-        ((w/2)/config.zoom)
+        detectionRange *
+        ((w/2)/zoom)
 
 
 
-    for angle=0,360,4 do
+    -- If range is outside zoom,
+    -- draw the edge of screen instead
+
+    if radius > w/2 then
+        radius = w/2
+    end
 
 
-        local rad =
+
+    for angle=0,360,3 do
+
+
+        local r =
             math.rad(angle)
 
 
@@ -189,27 +217,24 @@ local function drawRing(range)
         local x =
             math.floor(
                 w/2 +
-                math.cos(rad)*radius
+                math.cos(r)*radius
             )
 
 
         local y =
             math.floor(
                 h/2 +
-                math.sin(rad)*radius
+                math.sin(r)*radius*0.5
             )
 
 
 
-        if x>=1 and x<=w and y>=1 and y<=h then
-
-            monitor.setCursorPos(x,y)
-
-            monitor.setTextColor(colors.lightBlue)
-
-            monitor.write(".")
-
-        end
+        write(
+            x,
+            y,
+            ".",
+            colors.blue
+        )
 
 
     end
@@ -220,36 +245,37 @@ end
 
 
 
-
 local function drawCompass()
 
 
-    text(
+    -- edges of screen
+
+    write(
         math.floor(w/2),
-        2,
+        1,
         "N",
         colors.white
     )
 
 
-    text(
+    write(
         math.floor(w/2),
-        h-3,
+        h,
         "S",
         colors.white
     )
 
 
-    text(
-        2,
+    write(
+        1,
         math.floor(h/2),
         "W",
         colors.white
     )
 
 
-    text(
-        w-2,
+    write(
+        w,
         math.floor(h/2),
         "E",
         colors.white
@@ -261,10 +287,11 @@ end
 
 
 
+
 local function drawCenter()
 
 
-    text(
+    write(
         math.floor(w/2),
         math.floor(h/2),
         "+",
@@ -273,8 +300,6 @@ local function drawCenter()
 
 
 end
-
-
 
 
 
@@ -291,8 +316,10 @@ local function drawSweep()
 
 
 
-    local rad =
-        math.rad(sweepAngle)
+    local r =
+        math.rad(
+            sweepAngle
+        )
 
 
 
@@ -301,36 +328,31 @@ local function drawSweep()
 
         local x =
             math.floor(
-                w/2 +
-                math.cos(rad)*i
+                w/2+
+                math.cos(r)*i
             )
 
 
         local y =
             math.floor(
-                h/2 -
-                math.sin(rad)*i
+                h/2-
+                math.sin(r)*i*0.5
             )
 
 
-        if x>=1 and x<=w and y>=1 and y<=h then
-
-
-            monitor.setCursorPos(x,y)
-
-            monitor.setTextColor(colors.cyan)
-
-            monitor.write(".")
-
-
-        end
+        write(
+            x,
+            y,
+            ".",
+            colors.cyan
+        )
 
 
     end
 
 
-
 end
+
 
 
 
@@ -338,17 +360,17 @@ local function updateSweep()
 
 
     sweepAngle =
-        sweepAngle + 3
+        sweepAngle+4
 
 
-    if sweepAngle >= 360 then
+    if sweepAngle>=360 then
 
-        sweepAngle = 0
+        sweepAngle=0
 
     end
 
-
 end
+
 
 
 
@@ -360,13 +382,12 @@ end
 local function getContacts()
 
 
-    local contacts = {}
-
+    local contacts={}
 
 
     local players =
         detector.getPlayersInRange(
-            config.detectionRange
+            detectionRange
         )
 
 
@@ -386,19 +407,20 @@ local function getContacts()
                 contacts,
                 {
 
+
                     type="PL",
+
 
                     name=name,
 
-                    x =
-                    pos.x-config.origin.x,
+
+                    x=
+                    pos.x-originX,
 
 
-                    z =
-                    pos.z-config.origin.z,
+                    z=
+                    pos.z-originZ
 
-
-                    color=colors.green
 
                 }
             )
@@ -418,62 +440,36 @@ end
 
 
 
+
 local function drawContacts()
 
 
-    local contacts =
-        getContacts()
-
-
-
-    for _,contact in ipairs(contacts) do
-
+    for _,c in ipairs(getContacts()) do
 
 
         local x,y =
             worldToRadar(
-                contact.x,
-                contact.z
+                c.x,
+                c.z
             )
-
 
 
         if x>=1 and x<=w and y>=1 and y<=h then
 
 
-            text(
+            write(
                 x,
                 y,
                 "+",
-                contact.color
+                colors.green
             )
 
 
-
-            local d =
-                math.floor(
-                    distance(
-                        contact.x,
-                        contact.z
-                    )
-                )
-
-
-
-            text(
-                math.min(x+2,w-8),
+            write(
+                x+2,
                 y,
-                contact.type.." "..contact.name,
-                contact.color
-            )
-
-
-
-            text(
-                math.min(x+2,w-5),
-                y+1,
-                d.."m",
-                colors.lightGray
+                c.type.." "..c.name,
+                colors.green
             )
 
 
@@ -488,42 +484,25 @@ end
 
 
 ------------------------------------------------
--- UI
+-- BUTTONS
 ------------------------------------------------
 
 
-local function drawUI()
+local function drawButtons()
 
 
-    text(
-        2,
-        1,
-        "TACTICAL RADAR",
-        colors.white
-    )
+    local text =
+        "[-]  "..zoom.."m  [+]"
 
 
-    text(
-        w-18,
-        1,
-        "ZOOM "..config.zoom.."m",
-        colors.white
-    )
-
-
-    text(
-        2,
+    write(
+        math.floor(
+            w/2-
+            #text/2
+        ),
         h,
-        "[-]       [+]",
+        text,
         colors.white
-    )
-
-
-    text(
-        2,
-        h-1,
-        "ORIGIN "..config.origin.x..","..config.origin.z,
-        colors.lightGray
     )
 
 
@@ -532,21 +511,18 @@ end
 
 
 
-------------------------------------------------
--- BUTTONS
-------------------------------------------------
 
-
-local function buttons()
+local function buttonLoop()
 
 
     while true do
 
 
-        local e,x,y =
+        local _,x,y =
             os.pullEvent(
                 "monitor_touch"
             )
+
 
 
         if y==h then
@@ -555,59 +531,47 @@ local function buttons()
             if x < w/2 then
 
 
-                local index=1
+                for i,v in ipairs(zoomLevels) do
 
+                    if v==zoom then
 
-                for i,v in ipairs(config.zoomLevels) do
+                        zoom =
+                        zoomLevels[
+                            math.min(
+                                i+1,
+                                #zoomLevels
+                            )
+                        ]
 
-                    if v==config.zoom then
-
-                        index=i
+                        break
 
                     end
 
                 end
-
-
-                index =
-                    math.min(
-                        index+1,
-                        #config.zoomLevels
-                    )
-
-
-                config.zoom =
-                    config.zoomLevels[index]
 
 
             else
 
 
+                for i,v in ipairs(zoomLevels) do
 
-                local index=1
+                    if v==zoom then
 
 
-                for i,v in ipairs(config.zoomLevels) do
+                        zoom =
+                        zoomLevels[
+                            math.max(
+                                i-1,
+                                1
+                            )
+                        ]
 
-                    if v==config.zoom then
-
-                        index=i
+                        break
 
                     end
 
+
                 end
-
-
-
-                index =
-                    math.max(
-                        index-1,
-                        1
-                    )
-
-
-                config.zoom =
-                    config.zoomLevels[index]
 
 
             end
@@ -623,36 +587,30 @@ end
 
 
 
-
 ------------------------------------------------
--- RADAR LOOP
+-- MAIN LOOP
 ------------------------------------------------
 
 
-local function radar()
+local function radarLoop()
 
 
     while true do
 
 
-        clear()
+        fillBackground()
 
 
         drawGrid()
 
 
-        drawRing(50)
-
-        drawRing(100)
-
-        drawRing(config.zoom)
-
-
-
-        drawCompass()
+        drawRadarCircle()
 
 
         drawSweep()
+
+
+        drawCompass()
 
 
         drawCenter()
@@ -661,7 +619,7 @@ local function radar()
         drawContacts()
 
 
-        drawUI()
+        drawButtons()
 
 
 
@@ -681,8 +639,8 @@ end
 
 parallel.waitForAny(
 
-    radar,
+    radarLoop,
 
-    buttons
+    buttonLoop
 
 )
