@@ -1,529 +1,224 @@
---================================================--
--- AWACS Radar v2
--- Part 1 / 2
---================================================--
+-- Tactical Player Radar
+-- CC:Tweaked + Advanced Peripherals Player Detector
 
-local function warn(msg)
-    print("[AWACS WARNING] " .. msg)
+
+local monitor = peripheral.find("monitor")
+local detector = peripheral.find("playerDetector")
+
+
+if not monitor then
+    error("Monitor missing")
 end
 
-----------------------------------------------------
--- PERIPHERALS
-----------------------------------------------------
-
-local chat = peripheral.find("chatBox")
-local detector = peripheral.find("player_detector") or peripheral.find("playerDetector")
-local modem = peripheral.find("modem")
-local monitor = peripheral.find("monitor") or term
-
-if monitor ~= term then
-    monitor.setTextScale(0.5)
-end
-
-local w, h = monitor.getSize()
-local cx = math.floor(w / 2)
-local cy = math.floor(h / 2)
 
 if not detector then
-    warn("Player Detector missing - radar disabled")
-end
-
-if modem then
-    modem.open(1)
-else
-    warn("Modem missing - network disabled")
-end
-
-if not chat then
-    warn("ChatBox missing - alerts disabled")
-end
-
-----------------------------------------------------
--- CONFIG
-----------------------------------------------------
-
-local cfg = {
-
-    -- Radar position
-    x = 0,
-    y = 0,
-    z = 0,
-
-    -- Advanced Peripherals detector limit
-    range = 192,
-
-    update = 1,
-
-    host = "Usernam_",
-
-    cooldown = 10,
-
-    chatBroadcast = true
-}
-
-----------------------------------------------------
--- STATE
-----------------------------------------------------
-
-local memory = {}
-local alerted = {}
-
-local lastAlert = 0
-local lastSend = 0
-
-local SEND_RATE = 0.5
-
-----------------------------------------------------
--- HELPERS
-----------------------------------------------------
-
-local function distance(x1, y1, z1, x2, y2, z2)
-
-    local dx = x2 - x1
-    local dy = y2 - y1
-    local dz = z2 - z1
-
-    return math.sqrt(dx * dx + dy * dy + dz * dz)
-end
-
-----------------------------------------------------
--- CONTACT CLASSIFICATION
-----------------------------------------------------
-
-local function classify(contact)
-
-    local speed = contact.speed or 0
-    local y = contact.y or 0
-
-    local highAltitude = y >= 80
-    local fast = speed >= 25
-
-    if highAltitude and fast then
-        return "PLANE"
-    end
-
-    if highAltitude then
-        return "AIRBORNE"
-    end
-
-    if speed >= 6 then
-        return "FAST"
-    end
-
-    if speed < 0.4 then
-        return "STATIC"
-    end
-
-    return "PLAYER"
-
-end
-
-----------------------------------------------------
--- INCOMING CALCULATION
-----------------------------------------------------
-
-local function isIncoming(contact)
-
-    local vx = contact.x - contact.px
-    local vz = contact.z - contact.pz
-
-    local dx = cfg.x - contact.x
-    local dz = cfg.z - contact.z
-
-    local vlen = math.sqrt(vx * vx + vz * vz)
-    local dlen = math.sqrt(dx * dx + dz * dz)
-
-    if vlen == 0 or dlen == 0 then
-        return false
-    end
-
-    vx = vx / vlen
-    vz = vz / vlen
-
-    dx = dx / dlen
-    dz = dz / dlen
-
-    return (vx * dx + vz * dz) > 0.2
-
-end
-
-----------------------------------------------------
--- SCAN
-----------------------------------------------------
-
-local function scan()
-
-    if not detector then
-        return
-    end
-
-    local visible = {}
-
-    -- Only returns players inside 192 blocks.
-    local nearby = detector.getPlayersInRange(cfg.range)
-
-    for _, name in ipairs(nearby) do
-
-        local p = detector.getPlayer(name)
-
-        if p
-        and type(p.x) == "number"
-        and type(p.y) == "number"
-        and type(p.z) == "number" then
-
-            visible[name] = true
-
-            local old = memory[name]
-
-            memory[name] = {
-
-                id = name,
-
-                x = p.x,
-                y = p.y,
-                z = p.z,
-
-                px = old and old.x or p.x,
-                py = old and old.y or p.y,
-                pz = old and old.z or p.z,
-
-                speed = 0
-
-            }
-
-            memory[name].speed =
-                distance(
-                    memory[name].x,
-                    memory[name].y,
-                    memory[name].z,
-
-                    memory[name].px,
-                    memory[name].py,
-                    memory[name].pz
-                ) / cfg.update
-
-        end
-    end
-
-    -- Remove contacts that have left detector range.
-
-    for name in pairs(memory) do
-
-        if not visible[name] then
-
-            memory[name] = nil
-            alerted[name] = nil
-
-        end
-
-    end
-
-end
-
-----------------------------------------------------
--- CHAT ALERTS
-----------------------------------------------------
-
-local function alert(name, contact)
-
-    if not chat then
-        return
-    end
-
-    if not cfg.chatBroadcast then
-        return
-    end
-
-    local now = os.clock()
-
-    if now - lastAlert < cfg.cooldown then
-        return
-    end
-
-    lastAlert = now
-
-    local tag
-
-    if (contact.speed or 0) >= 25 then
-        tag = "AIR THREAT"
-    else
-        tag = "CONTACT"
-    end
-
-    chat.sendMessage(
-        "[AWACS] " ..
-        tag ..
-        " DETECTED: " ..
-        name
-    )
-
-end
-
-----------------------------------------------------
--- NETWORK
-----------------------------------------------------
-
-local function sendPacket(contacts, defcon, playerCount)
-
-    if not modem then
-        return
-    end
-
-    if os.clock() - lastSend < SEND_RATE then
-        return
-    end
-
-    lastSend = os.clock()
-
-    modem.transmit(1, 1, textutils.serialize({
-
-        system = "radar",
-
-        type = "update",
-
-        id = "radar_main",
-
-        timestamp = os.epoch("utc"),
-
-        data = {
-
-            defcon = defcon,
-
-            range = cfg.range,
-
-            position = {
-
-                x = cfg.x,
-                y = cfg.y,
-                z = cfg.z
-
-            },
-
-            stats = {
-
-                players = playerCount,
-                contacts = #contacts
-
-            },
-
-            contacts = contacts
-
-        }
-
-    }))
-
-end
-
-----------------------------------------------------
--- DISPLAY
-----------------------------------------------------
-
-local function grid()
-
-    for x = 1, w do
-
-        monitor.setCursorPos(x, cy)
-        monitor.write("-")
-
-    end
-
-
-    for y = 2, h do
-
-        monitor.setCursorPos(cx, y)
-        monitor.write("|")
-
-    end
-
+    error("Player detector missing")
 end
 
 
-local function toScreen(x, z)
 
-    return
-        cx + (x / cfg.range) * (w / 2),
-        cy + (z / cfg.range) * (h / 2)
-
-end
+monitor.setTextScale(0.5)
 
 
-local function drawContact(contact)
-
-    local dx = contact.x - cfg.x
-    local dz = contact.z - cfg.z
-
-    local sx, sy = toScreen(dx, dz)
+local w,h = monitor.getSize()
 
 
-    if sx >= 1
-    and sx <= w
-    and sy >= 2
-    and sy <= h then
+
+------------------------------------------------
+-- SETTINGS
+------------------------------------------------
 
 
-        monitor.setCursorPos(
-            math.floor(sx),
-            math.floor(sy)
+local RANGE = 192
+
+local zoom = 192
+
+
+-- Radar origin
+local originX = 0
+local originZ = 0
+
+
+
+------------------------------------------------
+-- Convert position
+------------------------------------------------
+
+
+function convertPosition(px,pz)
+
+
+    local scale =
+        (w/2) / zoom
+
+
+    local x =
+        math.floor(
+            w/2 +
+            px * scale
         )
 
 
-        if contact.type == "PLANE" then
-
-            monitor.setTextColor(colors.red)
-            monitor.write("A")
-
-
-        elseif contact.type == "AIRBORNE" then
-
-            monitor.setTextColor(colors.orange)
-            monitor.write("^")
-
-
-        elseif contact.type == "FAST" then
-
-            monitor.setTextColor(colors.yellow)
-            monitor.write(">")
-
-
-        else
-
-            monitor.setTextColor(colors.lightBlue)
-            monitor.write("o")
-
-        end
-
-    end
-
-end
-
-
-----------------------------------------------------
--- DEFCON
-----------------------------------------------------
-
-local function getDefcon(playerCount)
-
-    if playerCount == 0 then
-
-        return "GREEN", colors.green
-
-
-    elseif playerCount < 5 then
-
-        return "YELLOW", colors.yellow
-
-
-    else
-
-        return "RED", colors.red
-
-    end
-
-end
-
-
-----------------------------------------------------
--- MAIN LOOP
-----------------------------------------------------
-
-while true do
-
-
-    scan()
-
-
-    local contacts = {}
-    local playerCount = 0
-
-
-    for name, contact in pairs(memory) do
-
-
-        contact.type = classify(contact)
-
-        table.insert(
-            contacts,
-            contact
+    local y =
+        math.floor(
+            h/2 -
+            pz * scale
         )
 
 
-        if name ~= cfg.host then
+    return x,y
 
-            playerCount = playerCount + 1
-
-        end
-
-    end
+end
 
 
 
-    local defcon, defconColor =
-        getDefcon(playerCount)
+
+------------------------------------------------
+-- Draw background
+------------------------------------------------
 
 
+function clear()
 
-    sendPacket(
-        contacts,
-        defcon,
-        playerCount
-    )
-
-
-
-    ------------------------------------------------
-    -- DRAW RADAR
-    ------------------------------------------------
-
+    monitor.setBackgroundColor(colors.black)
 
     monitor.clear()
 
-    monitor.setCursorPos(1,1)
+
+end
 
 
-    monitor.setTextColor(colors.white)
 
-    monitor.write(
-        "AWACS | DEFCON: "
+function grid()
+
+
+    monitor.setTextColor(colors.gray)
+
+
+
+    for y=2,h-2 do
+
+        for x=1,w do
+
+
+            if x%3==0 and y%2==0 then
+
+                monitor.setCursorPos(x,y)
+
+                monitor.write(".")
+
+            end
+
+
+        end
+
+    end
+
+
+
+    -- center
+
+    monitor.setTextColor(colors.cyan)
+
+    monitor.setCursorPos(
+        math.floor(w/2),
+        math.floor(h/2)
     )
 
+    monitor.write("+")
+    
 
-    monitor.setTextColor(defconColor)
-
-    monitor.write(defcon)
-
-
-    monitor.setTextColor(colors.white)
-
-    monitor.write(
-        " | P:" ..
-        playerCount
-    )
+end
 
 
 
-    grid()
+
+------------------------------------------------
+-- Draw players
+------------------------------------------------
+
+
+function drawPlayers()
+
+
+    local players =
+        detector.getPlayers()
 
 
 
-    for _, contact in pairs(memory) do
+    for _,name in pairs(players) do
 
 
-        drawContact(contact)
+
+        local pos =
+            detector.getPlayerPos(name)
 
 
-        if contact.id ~= cfg.host
-        and isIncoming(contact)
-        and (contact.speed or 0) > 6 then
+
+        if pos then
 
 
-            if not alerted[contact.id] then
+            local relativeX =
+                pos.x - originX
 
-                alert(
-                    contact.id,
-                    contact
+
+            local relativeZ =
+                pos.z - originZ
+
+
+
+            local distance =
+                math.sqrt(
+                    relativeX^2 +
+                    relativeZ^2
                 )
 
-                alerted[contact.id] = true
+
+
+            if distance <= RANGE then
+
+
+
+                local x,y =
+                    convertPosition(
+                        relativeX,
+                        relativeZ
+                    )
+
+
+
+                if x>1 and x<w
+                and y>1 and y<h then
+
+
+
+                    monitor.setTextColor(
+                        colors.green
+                    )
+
+
+                    monitor.setCursorPos(
+                        x,
+                        y
+                    )
+
+                    monitor.write("+")
+                    
+
+
+                    monitor.setCursorPos(
+                        x+2,
+                        y
+                    )
+
+
+                    monitor.write(
+                        "PL "..name
+                    )
+
+
+
+                end
 
             end
 
@@ -531,11 +226,153 @@ while true do
 
     end
 
+end
+
+
+
+
+------------------------------------------------
+-- Coordinates
+------------------------------------------------
+
+
+function coordinates()
+
+
+    monitor.setTextColor(colors.lightGray)
+
+
+    monitor.setCursorPos(
+        2,
+        2
+    )
+
+    monitor.write(
+        "+"..zoom.."m"
+    )
+
+
+    monitor.setCursorPos(
+        2,
+        h-1
+    )
+
+
+    monitor.write(
+        "-"..zoom.."m"
+    )
+
+
+end
+
+
+
+
+------------------------------------------------
+-- Zoom buttons
+------------------------------------------------
+
+
+function buttons()
 
 
     monitor.setTextColor(colors.white)
 
 
-    sleep(cfg.update)
+    monitor.setCursorPos(
+        w/2-10,
+        h
+    )
+
+
+    monitor.write(
+        "[+] "..zoom.."m [-]"
+    )
+
 
 end
+
+
+
+
+------------------------------------------------
+-- Touch zoom
+------------------------------------------------
+
+
+function touchLoop()
+
+
+    while true do
+
+
+        local event,x,y =
+            os.pullEvent(
+                "monitor_touch"
+            )
+
+
+
+        if y == h then
+
+
+            if x < w/2 then
+
+                zoom = math.min(
+                    zoom*2,
+                    2000
+                )
+
+
+            else
+
+                zoom = math.max(
+                    zoom/2,
+                    16
+                )
+
+            end
+
+        end
+
+    end
+
+end
+
+
+
+
+------------------------------------------------
+-- Main
+------------------------------------------------
+
+
+parallel.waitForAny(
+
+    touchLoop,
+
+
+    function()
+
+        while true do
+
+
+            clear()
+
+            grid()
+
+            drawPlayers()
+
+            coordinates()
+
+            buttons()
+
+
+            sleep(0.2)
+
+        end
+
+
+    end
+
+)
