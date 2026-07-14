@@ -1,4 +1,4 @@
--- Tactical Radar V7
+-- Tactical Radar V8
 -- CC:Tweaked + Advanced Peripherals Player Detector
 
 
@@ -12,7 +12,7 @@ end
 
 
 if not detector then
-    error("Player Detector missing")
+    error("Player detector missing")
 end
 
 
@@ -29,18 +29,18 @@ local w,h = monitor.getSize()
 
 
 
--- Actual sensor limit
-local DETECTOR_RANGE = 192
+-- REAL SENSOR RANGE
+local RADAR_RANGE = 192
 
 
 
--- Display range
+-- DISPLAY SCALE
 local zoomLevels = {
-    25,
-    50,
-    100,
+    64,
+    96,
     192,
     256,
+    384,
     512,
     1024
 }
@@ -64,18 +64,17 @@ local origin = {
 
 local sweepAngle = 0
 
-local contacts = {}
-
 local oldContacts = {}
 
 
 
 ------------------------------------------------
--- DRAW HELPERS
+-- HELPERS
 ------------------------------------------------
 
 
 local function write(x,y,text,color)
+
 
     if x < 1 or x > w or y < 1 or y > h then
         return
@@ -149,26 +148,34 @@ local function worldToRadar(x,z)
 
 
 
-    local rx =
-        math.floor(
-            w/2+x*scaleX
-        )
+    return
+
+    math.floor(
+        w/2+x*scaleX
+    ),
+
+    math.floor(
+        h/2-z*scaleY
+    )
+
+end
 
 
-    local ry =
-        math.floor(
-            h/2-z*scaleY
-        )
 
 
-    return rx,ry
+local function radarRadius()
+
+
+    return RADAR_RANGE *
+        (w/2) /
+        zoom
 
 end
 
 
 
 ------------------------------------------------
--- STATIC RADAR
+-- STATIC DISPLAY
 ------------------------------------------------
 
 
@@ -181,7 +188,7 @@ local function drawStatic()
 
 
 
-    -- Grid
+    -- grid
 
     for y=2,h-2 do
 
@@ -207,7 +214,18 @@ local function drawStatic()
 
 
 
-    -- Range circle
+    -- radar circle
+
+
+    local radius =
+        radarRadius()
+
+
+
+    local yRadius =
+        radius *
+        (h/w)
+
 
 
     for angle=0,360,3 do
@@ -217,18 +235,21 @@ local function drawStatic()
             math.rad(angle)
 
 
+
         local x =
             math.floor(
                 w/2+
-                math.cos(r)*(w/2)
+                math.cos(r)*radius
             )
+
 
 
         local y =
             math.floor(
                 h/2+
-                math.sin(r)*(h/2)
+                math.sin(r)*yRadius
             )
+
 
 
         write(
@@ -244,7 +265,7 @@ local function drawStatic()
 
 
 
-    -- Compass
+    -- compass
 
 
     write(
@@ -300,8 +321,13 @@ end
 local function drawSweep()
 
 
-    local length =
-        math.min(w,h)/2
+    local radius =
+        radarRadius()
+
+
+
+    local yRadius =
+        radius*(h/w)
 
 
 
@@ -319,21 +345,31 @@ local function drawSweep()
 
 
 
-        for i=1,length do
+        for i=1,radius do
+
+
+            local ratio =
+                i/radius
+
 
 
             local x =
                 math.floor(
                     w/2+
-                    math.cos(angle)*i
+                    math.cos(angle)*
+                    radius*
+                    ratio
                 )
 
 
             local y =
                 math.floor(
                     h/2+
-                    math.sin(angle)*i
+                    math.sin(angle)*
+                    yRadius*
+                    ratio
                 )
+
 
 
             write(
@@ -362,6 +398,7 @@ local function updateSweep()
         sweepAngle+4
 
 
+
     if sweepAngle>=360 then
 
         sweepAngle=0
@@ -374,20 +411,20 @@ end
 
 
 ------------------------------------------------
--- PLAYER SENSOR
+-- PLAYER SCANNER
 ------------------------------------------------
 
 
 local function scanPlayers()
 
 
-    local result={}
+    local contacts={}
 
 
 
     local players =
         detector.getPlayersInRange(
-            DETECTOR_RANGE
+            RADAR_RANGE
         )
 
 
@@ -395,8 +432,9 @@ local function scanPlayers()
     for _,name in ipairs(players) do
 
 
+
         if detector.isPlayerInRange(
-            DETECTOR_RANGE,
+            RADAR_RANGE,
             name
         ) then
 
@@ -411,23 +449,16 @@ local function scanPlayers()
 
 
                 table.insert(
-                    result,
+                    contacts,
                     {
 
-
-                        type="PL",
-
-
                         name=name,
-
 
                         x=
                         pos.x-origin.x,
 
-
                         z=
                         pos.z-origin.z
-
 
                     }
                 )
@@ -443,47 +474,7 @@ local function scanPlayers()
 
 
 
-    return result
-
-end
-
-
-
-
-------------------------------------------------
--- CONTACT DRAWING
-------------------------------------------------
-
-
-local function eraseOldContacts()
-
-
-    for _,p in ipairs(oldContacts) do
-
-
-        local x,y =
-            worldToRadar(
-                p.x,
-                p.z
-            )
-
-
-        erase(
-            x,
-            y,
-            20
-        )
-
-
-        erase(
-            x,
-            y+1,
-            10
-        )
-
-
-    end
-
+    return contacts
 
 end
 
@@ -493,7 +484,7 @@ end
 local function drawContacts()
 
 
-    contacts =
+    local contacts =
         scanPlayers()
 
 
@@ -523,10 +514,12 @@ local function drawContacts()
 
 
 
-            local labelX=x+2
+            local labelX =
+                x+2
 
 
-            if labelX+10>w then
+
+            if labelX+12>w then
 
                 labelX=x-12
 
@@ -557,10 +550,6 @@ local function drawContacts()
 
 
     end
-
-
-
-    oldContacts=contacts
 
 
 end
@@ -604,7 +593,6 @@ end
 
 
 
-
 local function changeZoom(amount)
 
 
@@ -619,27 +607,19 @@ local function changeZoom(amount)
 
 
 
-            if new < 1 then
-
-                new=1
-
-            end
-
-
-
-            if new>#zoomLevels then
-
-                new=#zoomLevels
-
-            end
+            new =
+                math.max(
+                    1,
+                    math.min(
+                        new,
+                        #zoomLevels
+                    )
+                )
 
 
 
             zoom =
                 zoomLevels[new]
-
-
-            drawStatic()
 
 
             return
@@ -651,7 +631,6 @@ local function changeZoom(amount)
 
 
 end
-
 
 
 
@@ -672,19 +651,14 @@ local function buttonLoop()
         if y==h then
 
 
-
             if x>=2 and x<=4 then
-
 
                 changeZoom(-1)
 
 
-
             elseif x>=14 and x<=16 then
 
-
                 changeZoom(1)
-
 
 
             end
@@ -694,7 +668,6 @@ local function buttonLoop()
 
 
     end
-
 
 end
 
@@ -708,22 +681,7 @@ end
 local function radarLoop()
 
 
-    drawStatic()
-
-
-
     while true do
-
-
-
-        eraseOldContacts()
-
-
-        drawSweep()
-
-
-        sleep(0.05)
-
 
 
         drawStatic()
@@ -738,7 +696,6 @@ local function radarLoop()
         drawButtons()
 
 
-
         updateSweep()
 
 
@@ -749,6 +706,7 @@ local function radarLoop()
 
 
 end
+
 
 
 
