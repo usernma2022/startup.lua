@@ -1,0 +1,49 @@
+local detector = peripheral.find("playerDetector")
+
+if not detector then
+    error("Player Detector missing")
+end
+
+local RANGE = 192
+
+while true do
+
+    term.clear()
+    term.setCursorPos(1,1)
+
+    print("=== PLAYER SCAN ===")
+    print("Range: "..RANGE.."m")
+    print("")
+
+    local players = detector.getPlayersInRange(RANGE)
+
+    if #players == 0 then
+
+        print("No players detected")
+
+    else
+
+        for _,name in ipairs(players) do
+
+            local pos = detector.getPlayerPos(name)
+
+            if pos then
+                print(name)
+                print(
+                    "X:"..math.floor(pos.x)..
+                    " Y:"..math.floor(pos.y)..
+                    " Z:"..math.floor(pos.z)
+                )
+                print("")
+            else
+                print(name)
+                print("")
+            end
+
+        end
+
+    end
+
+    sleep(1)
+
+end
