@@ -5,15 +5,14 @@ if not detector then error("Player Detector missing") end
 if not modem then error("Modem missing") end
 
 
-local CHANNEL = 1
+local CHANNEL = 48291
 
 local HOST = "NORTH_RADAR"
 
-local ORIGIN_X = 500
-local ORIGIN_Z = -200
-
-local RADAR_RANGE = 384
-
+local ORIGIN_X = 0
+local ORIGIN_Z = 0
+local sweepAngle = 0
+local RADAR_RANGE = 192
 local UPDATE_TIME = 1
 
 
@@ -55,7 +54,9 @@ local function sendStatus()
 
         z=ORIGIN_Z,
 
-        range=RADAR_RANGE
+        range=RADAR_RANGE,
+
+        sweep=sweepAngle
 
     })
 
@@ -113,6 +114,8 @@ end
 
 
 while true do
+
+    sweepAngle = (sweepAngle + 4) % 360
 
     sendStatus()
 
