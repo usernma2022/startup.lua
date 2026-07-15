@@ -1,4 +1,3 @@
---
 local monitor = peripheral.find("monitor")
 local detector = peripheral.find("playerDetector")
 local modem = peripheral.find("modem")
@@ -13,7 +12,7 @@ local buffer = window.create(monitor,1,1,w,h)
 
 local NETWORK = true
 local CHANNEL = 48291
-
+local HQ_PRIORITY = true
 local HOST = "MAIN_HQ"
 
 if modem and NETWORK then
@@ -253,10 +252,28 @@ local function updateContacts()
 
         for _,contact in ipairs(list) do
 
-            table.insert(
-                contacts,
-                contact
-            )
+            local exists = false
+
+            for _,localContact in ipairs(contacts) do
+
+                if localContact.name == contact.name then
+
+                    exists = true
+                    break
+
+                end
+
+            end
+
+
+            if not exists then
+
+                table.insert(
+                    contacts,
+                    contact
+                )
+
+            end
 
         end
 
@@ -443,21 +460,28 @@ local function drawRemoteSweep()
             radarRadius(radar.range)
 
 
-        local angle =
-            math.rad(radar.sweep)
+        for offset=-15,15,2 do
+
+            local angle =
+                math.rad(
+                    radar.sweep + offset
+                )
 
 
-        for i=1,r do
+            for i=1,r do
 
-            local ratio=i/r
+                local ratio=i/r
 
-            drawText(
-                buffer,
-                sx+math.cos(angle)*r*ratio,
-                sy+math.sin(angle)*r*(h/w)*ratio,
-                ".",
-                colors.green
-            )
+
+                drawText(
+                    buffer,
+                    sx+math.cos(angle)*r*ratio,
+                    sy+math.sin(angle)*r*(h/w)*ratio,
+                    ".",
+                    colors.green
+                )
+
+            end
 
         end
 
@@ -807,7 +831,7 @@ local function radarLoop()
 
 
         sweepAngle =
-            (sweepAngle+4)%360
+            (sweepAngle+8)%360
 
 
         sleep(0.15)
