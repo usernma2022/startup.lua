@@ -186,6 +186,13 @@ local function acknowledge()
         false
     )
 
+
+    sendPacket({
+
+        type="ACK"
+
+    })
+
 end
 
 local function updateContacts()
@@ -329,7 +336,35 @@ end
 
 local function updateRemoteContacts(message)
 
-    remoteContacts[message.host] = message.contacts
+    local contacts = {}
+
+    for _,contact in ipairs(message.contacts) do
+
+        contact.authorized = isAuthorized(
+            contact.name
+        )
+
+        table.insert(
+            contacts,
+            contact
+        )
+
+
+        if not contact.authorized then
+
+            alarm = true
+
+            redstone.setOutput(
+                "right",
+                true
+            )
+
+        end
+
+    end
+
+
+    remoteContacts[message.host] = contacts
 
 end
 
