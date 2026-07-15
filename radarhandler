@@ -1,3 +1,4 @@
+--
 local monitor = peripheral.find("monitor")
 local detector = peripheral.find("playerDetector")
 local modem = peripheral.find("modem")
@@ -11,7 +12,7 @@ local w,h = monitor.getSize()
 local buffer = window.create(monitor,1,1,w,h)
 
 local NETWORK = true
-local CHANNEL = 1
+local CHANNEL = 48291
 
 local HOST = "MAIN_HQ"
 
@@ -300,6 +301,8 @@ local function updateRemoteRadar(message)
 
         range = message.range,
 
+        sweep = message.sweep or 0,
+
         time = os.time()
 
     }
@@ -381,7 +384,7 @@ local function drawBackground()
                 sx+math.cos(angle)*radius,
                 sy+math.sin(angle)*radius*(h/w),
                 ".",
-                colors.blue
+                colors.lightBlue
             )
 
         end
@@ -423,7 +426,44 @@ local function drawBackground()
 
 end
 
+local function drawRemoteSweep()
 
+    for _,radar in pairs(remoteRadars) do
+
+        local x,z =
+            radar.x-origin.x,
+            radar.z-origin.z
+
+
+        local sx,sy =
+            worldToRadar(x,z)
+
+
+        local r =
+            radarRadius(radar.range)
+
+
+        local angle =
+            math.rad(radar.sweep)
+
+
+        for i=1,r do
+
+            local ratio=i/r
+
+            drawText(
+                buffer,
+                sx+math.cos(angle)*r*ratio,
+                sy+math.sin(angle)*r*(h/w)*ratio,
+                ".",
+                colors.green
+            )
+
+        end
+
+    end
+
+end
 
 local function drawSweep()
 
@@ -630,13 +670,10 @@ end
 local function render()
 
     drawBackground()
-
+    drawRemoteSweep()
     drawSweep()
-
     drawContacts()
-
     drawUI()
-
     buffer.redraw()
 
 end
