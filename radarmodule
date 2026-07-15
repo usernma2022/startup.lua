@@ -6,9 +6,8 @@ if not modem then error("Modem missing") end
 
 
 local CHANNEL = 48291
-
+local alarm = false
 local HOST = "NORTH_RADAR"
-
 local ORIGIN_X = 0
 local ORIGIN_Z = 0
 local sweepAngle = 0
@@ -86,6 +85,8 @@ local function sendContacts()
 
                     z = pos.z,
 
+                    source = HOST,
+
                     distance = distance(
                         pos.x-ORIGIN_X,
                         pos.z-ORIGIN_Z
@@ -111,16 +112,52 @@ local function sendContacts()
 
 end
 
+local function modemLoop()
+
+    while true do
+
+        local _,side,channel,reply,message =
+            os.pullEvent("modem_message")
 
 
-while true do
+        if channel == CHANNEL
+        and type(message)=="table" then
 
-    sweepAngle = (sweepAngle + 8) % 360
+            if message.type=="ACK" then
 
-    sendStatus()
+                alarm=false
 
-    sendContacts()
+                redstone.setOutput(
+                    "right",
+                    false
+                )
 
-    sleep(UPDATE_TIME)
+            end
+
+        end
+
+    end
 
 end
+
+parallel.waitForAny(
+
+    modemLoop,
+
+    function()
+
+        while true do
+
+            sweepAngle = (sweepAngle + 8) % 360
+
+            sendStatus()
+
+            sendContacts()
+
+            sleep(UPDATE_TIME)
+
+        end
+
+    end
+
+)
