@@ -1,0 +1,123 @@
+local detector = peripheral.find("playerDetector")
+local modem = peripheral.find("modem")
+
+if not detector then error("Player Detector missing") end
+if not modem then error("Modem missing") end
+
+
+local CHANNEL = 1
+
+local HOST = "NORTH_RADAR"
+
+local ORIGIN_X = 500
+local ORIGIN_Z = -200
+
+local RADAR_RANGE = 384
+
+local UPDATE_TIME = 1
+
+
+modem.open(CHANNEL)
+
+
+
+local function distance(x,z)
+
+    return math.floor(
+        math.sqrt(x*x+z*z)
+    )
+
+end
+
+
+
+local function sendPacket(packet)
+
+    modem.transmit(
+        CHANNEL,
+        CHANNEL,
+        packet
+    )
+
+end
+
+
+
+local function sendStatus()
+
+    sendPacket({
+
+        type="RADAR_STATUS",
+
+        host=HOST,
+
+        x=ORIGIN_X,
+
+        z=ORIGIN_Z,
+
+        range=RADAR_RANGE
+
+    })
+
+end
+
+local function sendContacts()
+
+    local players = detector.getPlayersInRange(
+        RADAR_RANGE
+    )
+
+    local contacts = {}
+
+
+    for _,name in ipairs(players) do
+
+        local pos = detector.getPlayerPos(name)
+
+        if pos then
+
+            table.insert(
+                contacts,
+                {
+                    name = name,
+
+                    x = pos.x,
+
+                    z = pos.z,
+
+                    distance = distance(
+                        pos.x-ORIGIN_X,
+                        pos.z-ORIGIN_Z
+                    )
+
+                }
+            )
+
+        end
+
+    end
+
+
+    sendPacket({
+
+        type="CONTACTS",
+
+        host=HOST,
+
+        contacts=contacts
+
+    })
+
+end
+
+
+
+while true do
+
+    sendStatus()
+
+    sendContacts()
+
+    sleep(UPDATE_TIME)
+
+end
