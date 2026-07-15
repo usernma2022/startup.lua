@@ -1,4 +1,3 @@
--
 local monitor = peripheral.find("monitor")
 local detector = peripheral.find("playerDetector")
 local modem = peripheral.find("modem")
@@ -13,7 +12,8 @@ local buffer = window.create(monitor,1,1,w,h)
 
 local NETWORK = true
 local CHANNEL = 1
-local HOST = "RADAR_01"
+
+local HOST = "MAIN_HQ"
 
 if modem and NETWORK then
     modem.open(CHANNEL)
@@ -34,15 +34,16 @@ local zoomLevels = {
 local zoom = 192
 
 local origin = {
-    x=0,
-    z=0
+    x = 0,
+    z = 0
 }
 
 local sweepAngle = 0
-
 local alarm = false
 
 local contacts = {}
+local remoteContacts = {}
+local remoteRadars = {}
 local previousContacts = {}
 
 local authorized = {}
@@ -56,30 +57,53 @@ local function drawText(t,x,y,text,color)
     t.setCursorPos(math.floor(x),math.floor(y))
     t.setTextColor(color)
     t.write(text)
+
 end
 
+local function distance(x,z)
 
-local function saveAuthorization()
+    return math.floor(
+        math.sqrt(x*x+z*z)
+    )
 
-    local file = fs.open("authorized.cfg","w")
+end
 
-    for name,_ in pairs(authorized) do
-        file.writeLine(name)
+local function worldToRadar(x,z)
+
+    return math.floor(w/2+x*(w/2)/zoom),
+           math.floor(h/2-z*(h/2)/zoom)
+
+end
+
+local function radarRadius(range)
+
+    return range*(w/2)/zoom
+
+end
+
+local function sendPacket(packet)
+
+    if modem and NETWORK then
+
+        modem.transmit(
+            CHANNEL,
+            CHANNEL,
+            packet
+        )
+
     end
 
+end
+
+if not fs.exists("authorized.cfg") then
+
+    local file = fs.open("authorized.cfg","w")
     file.close()
+
 end
 
 
 local function loadAuthorization()
-
-    if not fs.exists("authorized.cfg") then
-
-        local file = fs.open("authorized.cfg","w")
-        file.close()
-
-    end
-
 
     local file = fs.open("authorized.cfg","r")
 
@@ -94,6 +118,20 @@ local function loadAuthorization()
         if line ~= "" then
             authorized[line] = true
         end
+
+    end
+
+    file.close()
+
+end
+
+
+local function saveAuthorization()
+
+    local file = fs.open("authorized.cfg","w")
+
+    for name,_ in pairs(authorized) do
+        file.writeLine(name)
     end
 
     file.close()
@@ -111,49 +149,32 @@ local function isAuthorized(name)
 end
 
 
-local function sendPacket(packet)
+local function authTerminal()
 
-    if modem and NETWORK then
+    term.clear()
+    term.setCursorPos(1,1)
 
-        modem.transmit(
-            CHANNEL,
-            CHANNEL,
-            packet
-        )
+    print("=== AUTHORIZATION ===")
+    print("")
+    print("Enter player name:")
+
+    term.write("> ")
+
+    local name = read()
+
+
+    if name and name ~= "" then
+
+        if not authorized[name] then
+
+            authorized[name] = true
+            saveAuthorization()
+
+        end
 
     end
 
 end
-
-local function distance(x,z)
-
-    return math.floor(
-        math.sqrt(
-            x*x + z*z
-        )
-    )
-
-end
-
-
-local function worldToRadar(x,z)
-
-    return math.floor(
-        w/2 + x*(w/2)/zoom
-    ),
-    math.floor(
-        h/2 - z*(h/2)/zoom
-    )
-
-end
-
-
-local function radarRadius()
-
-    return RADAR_RANGE*(w/2)/zoom
-
-end
-
 
 
 local function acknowledge()
@@ -166,8 +187,6 @@ local function acknowledge()
     )
 
 end
-
-
 
 local function updateContacts()
 
@@ -187,21 +206,12 @@ local function updateContacts()
             local z = pos.z - origin.z
 
             local contact = {
-
                 name = name,
-
                 x = x,
                 z = z,
-
-                distance = distance(
-                    x,
-                    z
-                ),
-
+                distance = distance(x,z),
                 authorized = isAuthorized(name)
-
             }
-
 
             table.insert(
                 newContacts,
@@ -209,18 +219,15 @@ local function updateContacts()
             )
 
 
-            if not contact.authorized then
+            if not contact.authorized
+            and not previousContacts[name] then
 
-                if not previousContacts[name] then
+                alarm = true
 
-                    alarm = true
-
-                    redstone.setOutput(
-                        "right",
-                        true
-                    )
-
-                end
+                redstone.setOutput(
+                    "right",
+                    true
+                )
 
             end
 
@@ -241,55 +248,13 @@ local function updateContacts()
     contacts = newContacts
 
 
-    sendPacket({
+    for _,list in pairs(remoteContacts) do
 
-        type="RADAR",
+        for _,contact in ipairs(list) do
 
-        host=HOST,
-
-        alarm=alarm,
-
-        contacts=contacts,
-
-        time=os.time()
-
-    })
-
-end
-
-
-
-local function authTerminal()
-
-    term.clear()
-
-    term.setCursorPos(
-        1,
-        1
-    )
-
-    print("=== AUTHORIZATION ===")
-    print("")
-    print("Enter player name:")
-    write("> ")
-
-    local name = read()
-
-
-    if name and name ~= "" then
-
-        if authorized[name] then
-
-            print("Already authorized")
-
-        else
-
-            authorized[name] = true
-
-            saveAuthorization()
-
-            print(
-                "Added "..name
+            table.insert(
+                contacts,
+                contact
             )
 
         end
@@ -297,20 +262,62 @@ local function authTerminal()
     end
 
 
-    sleep(1)
+    sendPacket({
+
+        type = "RADAR_STATUS",
+
+        host = HOST,
+
+        x = origin.x,
+
+        z = origin.z,
+
+        range = RADAR_RANGE
+
+    })
+
+
+    sendPacket({
+
+        type = "CONTACTS",
+
+        host = HOST,
+
+        contacts = contacts
+
+    })
 
 end
 
--- Part 3/4
 
+local function updateRemoteRadar(message)
+
+    remoteRadars[message.host] = {
+
+        x = message.x,
+
+        z = message.z,
+
+        range = message.range,
+
+        time = os.time()
+
+    }
+
+end
+
+
+local function updateRemoteContacts(message)
+
+    remoteContacts[message.host] = message.contacts
+
+end
 
 local function drawBackground()
 
     buffer.setBackgroundColor(colors.black)
     buffer.clear()
 
-
-    -- Grid
 
     for y=2,h-2 do
 
@@ -327,14 +334,14 @@ local function drawBackground()
                 )
 
             end
+
         end
+
     end
 
 
+    local r = radarRadius(RADAR_RANGE)
 
-    -- Radar circle
-
-    local r = radarRadius()
 
     for a=0,360,3 do
 
@@ -342,8 +349,8 @@ local function drawBackground()
 
         drawText(
             buffer,
-            w/2 + math.cos(rad)*r,
-            h/2 + math.sin(rad)*r*(h/w),
+            w/2+math.cos(rad)*r,
+            h/2+math.sin(rad)*r*(h/w),
             ".",
             colors.lightBlue
         )
@@ -351,8 +358,36 @@ local function drawBackground()
     end
 
 
+    for _,radar in pairs(remoteRadars) do
 
-    -- Compass
+        local x,z =
+            radar.x-origin.x,
+            radar.z-origin.z
+
+
+        local sx,sy = worldToRadar(x,z)
+
+        local radius = radarRadius(
+            radar.range
+        )
+
+
+        for a=0,360,4 do
+
+            local angle = math.rad(a)
+
+            drawText(
+                buffer,
+                sx+math.cos(angle)*radius,
+                sy+math.sin(angle)*radius*(h/w),
+                ".",
+                colors.blue
+            )
+
+        end
+
+    end
+
 
     drawText(
         buffer,
@@ -392,24 +427,26 @@ end
 
 local function drawSweep()
 
-    local r = radarRadius()
+    local r = radarRadius(
+        RADAR_RANGE
+    )
 
 
     for offset=-15,15,2 do
 
         local angle = math.rad(
-            sweepAngle + offset
+            sweepAngle+offset
         )
 
 
         for i=1,r do
 
-            local ratio = i/r
+            local ratio=i/r
 
             drawText(
                 buffer,
-                w/2 + math.cos(angle)*r*ratio,
-                h/2 + math.sin(angle)*r*(h/w)*ratio,
+                w/2+math.cos(angle)*r*ratio,
+                h/2+math.sin(angle)*r*(h/w)*ratio,
                 ".",
                 colors.green
             )
@@ -422,31 +459,31 @@ end
 
 
 
-local function findLabelPosition(x,y,name)
+local function labelPosition(x,y,name)
 
-    local labelX = x+2
-    local labelY = y
-
-
-    if labelX + #name > w then
-
-        labelX = x - #name - 2
-
-    end
+    local lx=x+2
+    local ly=y
 
 
-    if labelY < 2 then
+    if lx+#name>w then
 
-        labelY = 2
-
-    elseif labelY > h-3 then
-
-        labelY = h-3
+        lx=x-#name-2
 
     end
 
 
-    return labelX,labelY
+    if ly<2 then
+
+        ly=2
+
+    elseif ly>h-3 then
+
+        ly=h-3
+
+    end
+
+
+    return lx,ly
 
 end
 
@@ -454,7 +491,7 @@ end
 
 local function drawContacts()
 
-    local occupied = {}
+    local occupied={}
 
 
     for _,contact in ipairs(contacts) do
@@ -466,39 +503,36 @@ local function drawContacts()
         )
 
 
-        if sx >= 1 and sx <= w and
-           sy >= 2 and sy <= h-3 then
+        if sx>=1 and sx<=w
+        and sy>=2 and sy<=h-3 then
 
 
-            local key = sx..":"..sy
+            local key=sx..":"..sy
 
 
             while occupied[key] do
 
-                sy = sy + 2
+                sy=sy+2
 
-                key = sx..":"..sy
+                key=sx..":"..sy
 
             end
 
 
-            occupied[key] = true
+            occupied[key]=true
 
 
-
-            local plColor
-
+            local colour
 
             if contact.authorized then
 
-                plColor = colors.green
+                colour=colors.green
 
             else
 
-                plColor = colors.yellow
+                colour=colors.yellow
 
             end
-
 
 
             drawText(
@@ -506,15 +540,16 @@ local function drawContacts()
                 sx,
                 sy,
                 "+",
-                plColor
+                colour
             )
 
 
-            local lx,ly = findLabelPosition(
-                sx,
-                sy,
-                contact.name
-            )
+            local lx,ly =
+                labelPosition(
+                    sx,
+                    sy,
+                    contact.name
+                )
 
 
             drawText(
@@ -533,7 +568,6 @@ local function drawContacts()
                 contact.distance.."m",
                 colors.lightGray
             )
-
 
         end
 
@@ -607,9 +641,6 @@ local function render()
 
 end
 
--- Part 4/4
-
-
 local function changeZoom(amount)
 
     for i,value in ipairs(zoomLevels) do
@@ -625,7 +656,6 @@ local function changeZoom(amount)
             if index > #zoomLevels then
                 index = #zoomLevels
             end
-
 
             zoom = zoomLevels[index]
 
@@ -651,28 +681,20 @@ local function inputLoop()
         if y == h then
 
 
-            -- Zoom out
-
             if x >= 2 and x <= 4 then
 
                 changeZoom(-1)
 
-
-            -- Zoom in
 
             elseif x >= 14 and x <= 16 then
 
                 changeZoom(1)
 
 
-            -- Authorization
-
             elseif x >= w-12 and x < w-6 then
 
                 authTerminal()
 
-
-            -- Acknowledge alarm
 
             elseif x >= w-5 then
 
@@ -691,32 +713,40 @@ end
 local function modemLoop()
 
     if not modem or not NETWORK then
+
         while true do
             sleep(100)
         end
+
     end
 
 
     while true do
 
-        local event,side,channel,reply,message =
-            os.pullEvent("modem_message")
+        local _,side,channel,reply,message =
+            os.pullEvent(
+                "modem_message"
+            )
 
 
-        if channel == CHANNEL then
+        if channel == CHANNEL
+        and type(message) == "table" then
 
-            if type(message) == "table" then
+
+            if message.type == "RADAR_STATUS" then
+
+                if message.host ~= HOST then
+
+                    updateRemoteRadar(message)
+
+                end
 
 
-                if message.type == "PING" then
+            elseif message.type == "CONTACTS" then
 
-                    sendPacket({
+                if message.host ~= HOST then
 
-                        type="RADAR_REPLY",
-
-                        host=HOST
-
-                    })
+                    updateRemoteContacts(message)
 
                 end
 
@@ -739,9 +769,8 @@ local function radarLoop()
         render()
 
 
-        sweepAngle = (
-            sweepAngle + 4
-        ) % 360
+        sweepAngle =
+            (sweepAngle+4)%360
 
 
         sleep(0.15)
