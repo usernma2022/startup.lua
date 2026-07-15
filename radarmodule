@@ -1,23 +1,31 @@
-local oldTerm = os.pullEvent
+local PASSWORD = "Username"
 
-os.pullEvent = os.pullEventRaw
+local oldPullEvent = os.pullEventRaw
 
-term.clear()
-term.setCursorPos(1,1)
+os.pullEventRaw = function(filter)
 
-print("LOCKED")
-term.write("Password: ")
+    local event = {oldPullEvent(filter)}
 
-local password = read("*")
+    if event[1] == "terminate" then
 
-os.pullEvent = oldTerm
+        term.clear()
+        term.setCursorPos(1,1)
 
+        term.write("Password: ")
 
-if password ~= "Username" then
+        local input = read("*")
 
-    while true do
-        os.pullEventRaw()
+        if input ~= PASSWORD then
+
+            print("ACCESS DENIED")
+
+            return os.pullEventRaw(filter)
+
+        end
+
     end
+
+    return table.unpack(event)
 
 end
 
