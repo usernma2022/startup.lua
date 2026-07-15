@@ -115,7 +115,7 @@ end
 
 while true do
 
-    sweepAngle = (sweepAngle + 4) % 360
+    sweepAngle = (sweepAngle + 8) % 360
 
     sendStatus()
 
