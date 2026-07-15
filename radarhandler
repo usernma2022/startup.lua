@@ -1,4 +1,4 @@
-
+-
 local monitor = peripheral.find("monitor")
 local detector = peripheral.find("playerDetector")
 local modem = peripheral.find("modem")
@@ -47,7 +47,7 @@ local previousContacts = {}
 
 local authorized = {}
 
-local function write(t,x,y,text,color)
+local function drawText(t,x,y,text,color)
 
     if x < 1 or x > w or y < 1 or y > h then
         return
@@ -318,7 +318,7 @@ local function drawBackground()
 
             if x%5==0 and y%3==0 then
 
-                write(
+                drawText(
                     buffer,
                     x,
                     y,
@@ -340,7 +340,7 @@ local function drawBackground()
 
         local rad = math.rad(a)
 
-        write(
+        drawText(
             buffer,
             w/2 + math.cos(rad)*r,
             h/2 + math.sin(rad)*r*(h/w),
@@ -354,7 +354,7 @@ local function drawBackground()
 
     -- Compass
 
-    write(
+    drawText(
         buffer,
         w/2,
         1,
@@ -362,7 +362,7 @@ local function drawBackground()
         colors.white
     )
 
-    write(
+    drawText(
         buffer,
         w/2,
         h,
@@ -370,7 +370,7 @@ local function drawBackground()
         colors.white
     )
 
-    write(
+    drawText(
         buffer,
         1,
         h/2,
@@ -378,7 +378,7 @@ local function drawBackground()
         colors.white
     )
 
-    write(
+    drawText(
         buffer,
         w,
         h/2,
@@ -406,7 +406,7 @@ local function drawSweep()
 
             local ratio = i/r
 
-            write(
+            drawText(
                 buffer,
                 w/2 + math.cos(angle)*r*ratio,
                 h/2 + math.sin(angle)*r*(h/w)*ratio,
@@ -501,7 +501,7 @@ local function drawContacts()
 
 
 
-            write(
+            drawText(
                 buffer,
                 sx,
                 sy,
@@ -517,7 +517,7 @@ local function drawContacts()
             )
 
 
-            write(
+            drawText(
                 buffer,
                 lx,
                 ly,
@@ -526,7 +526,7 @@ local function drawContacts()
             )
 
 
-            write(
+            drawText(
                 buffer,
                 lx,
                 ly+1,
@@ -545,7 +545,7 @@ end
 
 local function drawUI()
 
-    write(
+    drawText(
         buffer,
         2,
         h,
@@ -554,7 +554,7 @@ local function drawUI()
     )
 
 
-    write(
+    drawText(
         buffer,
         6,
         h,
@@ -563,7 +563,7 @@ local function drawUI()
     )
 
 
-    write(
+    drawText(
         buffer,
         14,
         h,
@@ -572,7 +572,7 @@ local function drawUI()
     )
 
 
-    write(
+    drawText(
         buffer,
         w-12,
         h,
@@ -581,7 +581,7 @@ local function drawUI()
     )
 
 
-    write(
+    drawText(
         buffer,
         w-5,
         h,
