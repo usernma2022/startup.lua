@@ -1,7 +1,7 @@
---
 
 local monitor = peripheral.find("monitor")
 local detector = peripheral.find("playerDetector")
+local modem = peripheral.find("modem")
 
 if not monitor then error("Monitor missing") end
 if not detector then error("Player Detector missing") end
@@ -9,26 +9,49 @@ if not detector then error("Player Detector missing") end
 monitor.setTextScale(0.5)
 
 local w,h = monitor.getSize()
+local buffer = window.create(monitor,1,1,w,h)
+
+local NETWORK = true
+local CHANNEL = 1
+local HOST = "RADAR_01"
+
+if modem and NETWORK then
+    modem.open(CHANNEL)
+end
 
 local RADAR_RANGE = 192
-local zoomLevels = {64,96,192,256,384,512,1024}
+
+local zoomLevels = {
+    64,
+    96,
+    192,
+    256,
+    384,
+    512,
+    1024
+}
+
 local zoom = 192
 
-local origin = {x=0,z=0}
-
-local buffer = window.create(monitor,1,1,w,h)
+local origin = {
+    x=0,
+    z=0
+}
 
 local sweepAngle = 0
 
-local knownPlayers = {}
 local alarm = false
 
+local contacts = {}
+local previousContacts = {}
 
-redstone.setOutput("right",false)
-
+local authorized = {}
 
 local function write(t,x,y,text,color)
-    if x<1 or x>w or y<1 or y>h then return end
+
+    if x < 1 or x > w or y < 1 or y > h then
+        return
+    end
 
     t.setCursorPos(math.floor(x),math.floor(y))
     t.setTextColor(color)
@@ -36,69 +59,249 @@ local function write(t,x,y,text,color)
 end
 
 
+local function saveAuthorization()
+
+    local file = fs.open("authorized.cfg","w")
+
+    for name,_ in pairs(authorized) do
+        file.writeLine(name)
+    end
+
+    file.close()
+end
+
+
+local function loadAuthorization()
+
+    if not fs.exists("authorized.cfg") then
+
+        local file = fs.open("authorized.cfg","w")
+        file.close()
+
+    end
+
+
+    local file = fs.open("authorized.cfg","r")
+
+    while true do
+
+        local line = file.readLine()
+
+        if not line then
+            break
+        end
+
+        if line ~= "" then
+            authorized[line] = true
+        end
+    end
+
+    file.close()
+
+end
+
+
+loadAuthorization()
+
+
+local function isAuthorized(name)
+
+    return authorized[name] == true
+
+end
+
+
+local function sendPacket(packet)
+
+    if modem and NETWORK then
+
+        modem.transmit(
+            CHANNEL,
+            CHANNEL,
+            packet
+        )
+
+    end
+
+end
+
 local function distance(x,z)
-    return math.floor(math.sqrt(x*x+z*z))
+
+    return math.floor(
+        math.sqrt(
+            x*x + z*z
+        )
+    )
+
 end
 
 
 local function worldToRadar(x,z)
-    return math.floor(w/2+x*(w/2)/zoom),
-           math.floor(h/2-z*(h/2)/zoom)
+
+    return math.floor(
+        w/2 + x*(w/2)/zoom
+    ),
+    math.floor(
+        h/2 - z*(h/2)/zoom
+    )
+
 end
 
 
 local function radarRadius()
+
     return RADAR_RANGE*(w/2)/zoom
+
 end
 
-
-local function checkPlayers()
-
-    local players = detector.getPlayersInRange(RADAR_RANGE)
-
-    for _,name in ipairs(players) do
-
-        if not knownPlayers[name] then
-
-            knownPlayers[name]=true
-            alarm=true
-            redstone.setOutput("right",true)
-
-        end
-    end
-
-
-    -- remove players who left
-    for name,_ in pairs(knownPlayers) do
-
-        local exists=false
-
-        for _,p in ipairs(players) do
-            if p==name then
-                exists=true
-            end
-        end
-
-        if not exists then
-            knownPlayers[name]=nil
-        end
-    end
-end
 
 
 local function acknowledge()
 
-    local players = detector.getPlayersInRange(RADAR_RANGE)
+    alarm = false
 
-    for _,name in ipairs(players) do
-        knownPlayers[name]=true
-    end
-
-    alarm=false
-    redstone.setOutput("right",false)
+    redstone.setOutput(
+        "right",
+        false
+    )
 
 end
 
+
+
+local function updateContacts()
+
+    local players = detector.getPlayersInRange(
+        RADAR_RANGE
+    )
+
+    local newContacts = {}
+
+    for _,name in ipairs(players) do
+
+        local pos = detector.getPlayerPos(name)
+
+        if pos then
+
+            local x = pos.x - origin.x
+            local z = pos.z - origin.z
+
+            local contact = {
+
+                name = name,
+
+                x = x,
+                z = z,
+
+                distance = distance(
+                    x,
+                    z
+                ),
+
+                authorized = isAuthorized(name)
+
+            }
+
+
+            table.insert(
+                newContacts,
+                contact
+            )
+
+
+            if not contact.authorized then
+
+                if not previousContacts[name] then
+
+                    alarm = true
+
+                    redstone.setOutput(
+                        "right",
+                        true
+                    )
+
+                end
+
+            end
+
+        end
+
+    end
+
+
+    previousContacts = {}
+
+    for _,contact in ipairs(newContacts) do
+
+        previousContacts[contact.name] = true
+
+    end
+
+
+    contacts = newContacts
+
+
+    sendPacket({
+
+        type="RADAR",
+
+        host=HOST,
+
+        alarm=alarm,
+
+        contacts=contacts,
+
+        time=os.time()
+
+    })
+
+end
+
+
+
+local function authTerminal()
+
+    term.clear()
+
+    term.setCursorPos(
+        1,
+        1
+    )
+
+    print("=== AUTHORIZATION ===")
+    print("")
+    print("Enter player name:")
+    write("> ")
+
+    local name = read()
+
+
+    if name and name ~= "" then
+
+        if authorized[name] then
+
+            print("Already authorized")
+
+        else
+
+            authorized[name] = true
+
+            saveAuthorization()
+
+            print(
+                "Added "..name
+            )
+
+        end
+
+    end
+
+
+    sleep(1)
+
+end
+
+-- Part 3/4
 
 
 local function drawBackground()
@@ -107,28 +310,40 @@ local function drawBackground()
     buffer.clear()
 
 
+    -- Grid
+
     for y=2,h-2 do
+
         for x=1,w do
 
             if x%5==0 and y%3==0 then
-                write(buffer,x,y,".",colors.gray)
-            end
 
+                write(
+                    buffer,
+                    x,
+                    y,
+                    ".",
+                    colors.gray
+                )
+
+            end
         end
     end
 
 
-    local r=radarRadius()
 
+    -- Radar circle
+
+    local r = radarRadius()
 
     for a=0,360,3 do
 
-        local rad=math.rad(a)
+        local rad = math.rad(a)
 
         write(
             buffer,
-            w/2+math.cos(rad)*r,
-            h/2+math.sin(rad)*r*(h/w),
+            w/2 + math.cos(rad)*r,
+            h/2 + math.sin(rad)*r*(h/w),
             ".",
             colors.lightBlue
         )
@@ -136,10 +351,40 @@ local function drawBackground()
     end
 
 
-    write(buffer,w/2,1,"N",colors.white)
-    write(buffer,w/2,h,"S",colors.white)
-    write(buffer,1,h/2,"W",colors.white)
-    write(buffer,w,h/2,"E",colors.white)
+
+    -- Compass
+
+    write(
+        buffer,
+        w/2,
+        1,
+        "N",
+        colors.white
+    )
+
+    write(
+        buffer,
+        w/2,
+        h,
+        "S",
+        colors.white
+    )
+
+    write(
+        buffer,
+        1,
+        h/2,
+        "W",
+        colors.white
+    )
+
+    write(
+        buffer,
+        w,
+        h/2,
+        "E",
+        colors.white
+    )
 
 end
 
@@ -147,74 +392,194 @@ end
 
 local function drawSweep()
 
-    local r=radarRadius()
+    local r = radarRadius()
+
 
     for offset=-15,15,2 do
 
-        local a=math.rad(sweepAngle+offset)
+        local angle = math.rad(
+            sweepAngle + offset
+        )
+
 
         for i=1,r do
 
-            local ratio=i/r
+            local ratio = i/r
 
             write(
                 buffer,
-                w/2+math.cos(a)*r*ratio,
-                h/2+math.sin(a)*r*(h/w)*ratio,
+                w/2 + math.cos(angle)*r*ratio,
+                h/2 + math.sin(angle)*r*(h/w)*ratio,
                 ".",
                 colors.green
             )
 
         end
+
     end
+
 end
 
 
 
-local function drawPlayers()
+local function findLabelPosition(x,y,name)
 
-    for _,name in ipairs(detector.getPlayersInRange(RADAR_RANGE)) do
-
-        local pos=detector.getPlayerPos(name)
-
-        if pos then
-
-            local x=pos.x-origin.x
-            local z=pos.z-origin.z
-
-            local sx,sy=worldToRadar(x,z)
-
-            if sx>=1 and sx<=w and sy>=2 and sy<=h-2 then
-
-                write(
-                    buffer,
-                    sx,
-                    sy,
-                    "+",
-                    colors.green
-                )
+    local labelX = x+2
+    local labelY = y
 
 
-                write(
-                    buffer,
-                    sx+2,
-                    sy,
-                    name,
-                    colors.white
-                )
+    if labelX + #name > w then
+
+        labelX = x - #name - 2
+
+    end
+
+
+    if labelY < 2 then
+
+        labelY = 2
+
+    elseif labelY > h-3 then
+
+        labelY = h-3
+
+    end
+
+
+    return labelX,labelY
+
+end
+
+
+
+local function drawContacts()
+
+    local occupied = {}
+
+
+    for _,contact in ipairs(contacts) do
+
+
+        local sx,sy = worldToRadar(
+            contact.x,
+            contact.z
+        )
+
+
+        if sx >= 1 and sx <= w and
+           sy >= 2 and sy <= h-3 then
+
+
+            local key = sx..":"..sy
+
+
+            while occupied[key] do
+
+                sy = sy + 2
+
+                key = sx..":"..sy
 
             end
+
+
+            occupied[key] = true
+
+
+
+            local plColor
+
+
+            if contact.authorized then
+
+                plColor = colors.green
+
+            else
+
+                plColor = colors.yellow
+
+            end
+
+
+
+            write(
+                buffer,
+                sx,
+                sy,
+                "+",
+                plColor
+            )
+
+
+            local lx,ly = findLabelPosition(
+                sx,
+                sy,
+                contact.name
+            )
+
+
+            write(
+                buffer,
+                lx,
+                ly,
+                contact.name,
+                colors.white
+            )
+
+
+            write(
+                buffer,
+                lx,
+                ly+1,
+                contact.distance.."m",
+                colors.lightGray
+            )
+
+
         end
+
     end
+
 end
 
 
 
 local function drawUI()
 
-    write(buffer,2,h,"[-]",colors.white)
-    write(buffer,6,h,zoom.."m",colors.white)
-    write(buffer,14,h,"[+]",colors.white)
+    write(
+        buffer,
+        2,
+        h,
+        "[-]",
+        colors.white
+    )
+
+
+    write(
+        buffer,
+        6,
+        h,
+        zoom.."m",
+        colors.white
+    )
+
+
+    write(
+        buffer,
+        14,
+        h,
+        "[+]",
+        colors.white
+    )
+
+
+    write(
+        buffer,
+        w-12,
+        h,
+        "[AUTH]",
+        colors.white
+    )
+
 
     write(
         buffer,
@@ -231,88 +596,168 @@ end
 local function render()
 
     drawBackground()
+
     drawSweep()
-    drawPlayers()
+
+    drawContacts()
+
     drawUI()
 
     buffer.redraw()
 
 end
 
-
-
-local function updateSweep()
-    sweepAngle=(sweepAngle+4)%360
-end
-
+-- Part 4/4
 
 
 local function changeZoom(amount)
 
-    for i,v in ipairs(zoomLevels) do
+    for i,value in ipairs(zoomLevels) do
 
-        if v==zoom then
+        if value == zoom then
 
-            zoom=zoomLevels[
-                math.max(
-                    1,
-                    math.min(
-                        i+amount,
-                        #zoomLevels
-                    )
-                )
-            ]
+            local index = i + amount
+
+            if index < 1 then
+                index = 1
+            end
+
+            if index > #zoomLevels then
+                index = #zoomLevels
+            end
+
+
+            zoom = zoomLevels[index]
 
             return
+
         end
+
     end
+
 end
 
 
 
-local function buttonLoop()
+local function inputLoop()
 
     while true do
 
-        local _,_,x,y=os.pullEvent("monitor_touch")
+        local _,_,x,y = os.pullEvent(
+            "monitor_touch"
+        )
 
 
-        if y==h then
+        if y == h then
 
-            if x>=2 and x<=4 then
+
+            -- Zoom out
+
+            if x >= 2 and x <= 4 then
+
                 changeZoom(-1)
 
-            elseif x>=14 and x<=16 then
+
+            -- Zoom in
+
+            elseif x >= 14 and x <= 16 then
+
                 changeZoom(1)
 
-            elseif x>=w-5 then
+
+            -- Authorization
+
+            elseif x >= w-12 and x < w-6 then
+
+                authTerminal()
+
+
+            -- Acknowledge alarm
+
+            elseif x >= w-5 then
+
                 acknowledge()
 
             end
 
         end
+
     end
+
+end
+
+
+
+local function modemLoop()
+
+    if not modem or not NETWORK then
+        while true do
+            sleep(100)
+        end
+    end
+
+
+    while true do
+
+        local event,side,channel,reply,message =
+            os.pullEvent("modem_message")
+
+
+        if channel == CHANNEL then
+
+            if type(message) == "table" then
+
+
+                if message.type == "PING" then
+
+                    sendPacket({
+
+                        type="RADAR_REPLY",
+
+                        host=HOST
+
+                    })
+
+                end
+
+            end
+
+        end
+
+    end
+
+end
+
+
+
+local function radarLoop()
+
+    while true do
+
+        updateContacts()
+
+        render()
+
+
+        sweepAngle = (
+            sweepAngle + 4
+        ) % 360
+
+
+        sleep(0.15)
+
+    end
+
 end
 
 
 
 parallel.waitForAny(
 
-    buttonLoop,
+    inputLoop,
 
-    function()
+    modemLoop,
 
-        while true do
+    radarLoop
 
-            checkPlayers()
-
-            render()
-
-            updateSweep()
-
-            sleep(0.15)
-
-        end
-
-    end
 )
