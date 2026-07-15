@@ -1,3 +1,26 @@
+local oldTerm = os.pullEvent
+
+os.pullEvent = os.pullEventRaw
+
+term.clear()
+term.setCursorPos(1,1)
+
+print("LOCKED")
+term.write("Password: ")
+
+local password = read("*")
+
+os.pullEvent = oldTerm
+
+
+if password ~= "Username" then
+
+    while true do
+        os.pullEventRaw()
+    end
+
+end
+
 local detector = peripheral.find("playerDetector")
 local modem = peripheral.find("modem")
 
