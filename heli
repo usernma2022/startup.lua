@@ -1,24 +1,37 @@
+local targetRoll = 0
+local targetPitch = 0
+
 while true do
+
     local q = ship.getQuaternion()
-    local vel = ship.getVelocity()
-    local ang = ship.getAngularVelocity()
+
+    -- CHANGE THESE BASED ON YOUR TESTS
+    local roll = q.v.x
+    local pitch = q.v.y
+
+    local rollError = roll - targetRoll
+    local pitchError = pitch - targetPitch
 
     term.clear()
     term.setCursorPos(1,1)
 
-    print("Quaternion")
-    print("a:", q.a)
-    print("x:", q.v.x)
-    print("y:", q.v.y)
-    print("z:", q.v.z)
+    print("ATTITUDE MONITOR")
+    print("")
+
+    print("Roll:")
+    print(roll)
+
+    print("Roll Error:")
+    print(rollError)
 
     print("")
-    print("Velocity")
-    print(vel.x, vel.y, vel.z)
 
-    print("")
-    print("Angular Velocity")
-    print(ang.x, ang.y, ang.z)
+    print("Pitch:")
+    print(pitch)
+
+    print("Pitch Error:")
+    print(pitchError)
 
     sleep(0.1)
+
 end
