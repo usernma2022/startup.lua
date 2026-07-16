@@ -1,37 +1,17 @@
-local targetRoll = 0
-local targetPitch = 0
+local gain = 40
 
 while true do
-
     local q = ship.getQuaternion()
 
-    -- CHANGE THESE BASED ON YOUR TESTS
     local roll = q.v.x
-    local pitch = q.v.y
 
-    local rollError = roll - targetRoll
-    local pitchError = pitch - targetPitch
+    local output = math.floor(math.abs(roll * gain))
 
-    term.clear()
-    term.setCursorPos(1,1)
+    if output > 15 then
+        output = 15
+    end
 
-    print("ATTITUDE MONITOR")
-    print("")
+    redstone.setAnalogOutput("right", output)
 
-    print("Roll:")
-    print(roll)
-
-    print("Roll Error:")
-    print(rollError)
-
-    print("")
-
-    print("Pitch:")
-    print(pitch)
-
-    print("Pitch Error:")
-    print(pitchError)
-
-    sleep(0.1)
-
+    sleep(0.05)
 end
