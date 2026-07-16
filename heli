@@ -1,23 +1,69 @@
-local gain = 50
+-- Helicopter Roll Stabiliser Test
+-- CC:VS + Drive By Wire
+
+-- CONFIG
+local leftFlapSide = "left"
+local rightFlapSide = "right"
+
+local gain = 50        -- Increase/decrease correction strength
+local deadzone = 0.01  -- Ignore tiny movements
+
+-- Invert if the helicopter reacts the wrong way
+local invert = false
+
 
 while true do
+
     local q = ship.getQuaternion()
 
+    -- Roll axis
     local roll = q.v.x
 
-    -- calculate correction
+    -- Remove tiny vibration
+    if math.abs(roll) < deadzone then
+        roll = 0
+    end
+
+
+    -- Calculate correction
     local correction = math.floor(roll * gain)
 
-    -- limit
+    -- Limit output
     if correction > 15 then
         correction = 15
     elseif correction < -15 then
         correction = -15
     end
 
-    -- differential flap control
-    redstone.setAnalogOutput("left", 8 + correction)
-    redstone.setAnalogOutput("right", 8 - correction)
+
+    -- Invert direction if needed
+    if invert then
+        correction = -correction
+    end
+
+
+    -- Differential flap control
+    if correction > 0 then
+
+        -- Roll correction one direction
+        redstone.setAnalogOutput(leftFlapSide, correction)
+        redstone.setAnalogOutput(rightFlapSide, 0)
+
+    elseif correction < 0 then
+
+        -- Roll correction opposite direction
+        redstone.setAnalogOutput(leftFlapSide, 0)
+        redstone.setAnalogOutput(rightFlapSide, -correction)
+
+    else
+
+        -- Neutral
+        redstone.setAnalogOutput(leftFlapSide, 0)
+        redstone.setAnalogOutput(rightFlapSide, 0)
+
+    end
+
 
     sleep(0.05)
+
 end
