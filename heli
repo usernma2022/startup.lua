@@ -1,69 +1,76 @@
--- Helicopter Roll Stabiliser Test
--- CC:VS + Drive By Wire
+-- OUTPUTS
+local rollL = "left"
+local rollR = "right"
 
--- CONFIG
-local leftFlapSide = "left"
-local rightFlapSide = "right"
+local pitchF = "front"
+local pitchB = "back"
 
-local gain = 50        -- Increase/decrease correction strength
-local deadzone = 0.01  -- Ignore tiny movements
+-- TUNING
+local rollGain = 15
+local pitchGain = 10
 
--- Invert if the helicopter reacts the wrong way
-local invert = false
+local rollDamp = 8
+local pitchDamp = 8
+
+local deadzone = 0.01
+local max = 15
+
+
+local function clamp(v)
+    if v > max then return max end
+    if v < -max then return -max end
+    return math.floor(v)
+end
 
 
 while true do
 
     local q = ship.getQuaternion()
+    local a = ship.getAngularVelocity()
 
-    -- Roll axis
     local roll = q.v.x
+    local pitch = q.v.z
 
-    -- Remove tiny vibration
-    if math.abs(roll) < deadzone then
-        roll = 0
-    end
-
-
-    -- Calculate correction
-    local correction = math.floor(roll * gain)
-
-    -- Limit output
-    if correction > 15 then
-        correction = 15
-    elseif correction < -15 then
-        correction = -15
-    end
+    if math.abs(roll) < deadzone then roll = 0 end
+    if math.abs(pitch) < deadzone then pitch = 0 end
 
 
-    -- Invert direction if needed
-    if invert then
-        correction = -correction
-    end
+    local r = clamp(
+        roll * rollGain -
+        a.x * rollDamp
+    )
+
+    local p = clamp(
+        pitch * pitchGain -
+        a.z * pitchDamp
+    )
 
 
-    -- Differential flap control
-    if correction > 0 then
-
-        -- Roll correction one direction
-        redstone.setAnalogOutput(leftFlapSide, correction)
-        redstone.setAnalogOutput(rightFlapSide, 0)
-
-    elseif correction < 0 then
-
-        -- Roll correction opposite direction
-        redstone.setAnalogOutput(leftFlapSide, 0)
-        redstone.setAnalogOutput(rightFlapSide, -correction)
-
+    -- ROLL
+    if r > 0 then
+        redstone.setAnalogOutput(rollL, r)
+        redstone.setAnalogOutput(rollR, 0)
+    elseif r < 0 then
+        redstone.setAnalogOutput(rollL, 0)
+        redstone.setAnalogOutput(rollR, -r)
     else
+        redstone.setAnalogOutput(rollL, 0)
+        redstone.setAnalogOutput(rollR, 0)
+    end
 
-        -- Neutral
-        redstone.setAnalogOutput(leftFlapSide, 0)
-        redstone.setAnalogOutput(rightFlapSide, 0)
 
+    -- PITCH
+    if p > 0 then
+        redstone.setAnalogOutput(pitchF, p)
+        redstone.setAnalogOutput(pitchB, 0)
+    elseif p < 0 then
+        redstone.setAnalogOutput(pitchF, 0)
+        redstone.setAnalogOutput(pitchB, -p)
+    else
+        redstone.setAnalogOutput(pitchF, 0)
+        redstone.setAnalogOutput(pitchB, 0)
     end
 
 
     sleep(0.05)
-
 end
