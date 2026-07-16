@@ -1,14 +1,12 @@
-local ship = peripheral.wrap("back")
-
 while true do
     local q = ship.getQuaternion()
     local vel = ship.getVelocity()
-    local omega = ship.getOmega()
+    local ang = ship.getAngularVelocity()
 
     term.clear()
     term.setCursorPos(1,1)
 
-    print("Rotation")
+    print("Quaternion")
     print("a:", q.a)
     print("x:", q.v.x)
     print("y:", q.v.y)
@@ -19,8 +17,8 @@ while true do
     print(vel.x, vel.y, vel.z)
 
     print("")
-    print("Omega")
-    print(omega.x, omega.y, omega.z)
+    print("Angular Velocity")
+    print(ang.x, ang.y, ang.z)
 
     sleep(0.1)
 end
