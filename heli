@@ -1,76 +1,25 @@
--- OUTPUTS
-local rollL = "left"
-local rollR = "right"
+local side = "back"
 
-local pitchF = "front"
-local pitchB = "back"
-
--- TUNING
-local rollGain = 15
-local pitchGain = 10
-
-local rollDamp = 8
-local pitchDamp = 8
-
-local deadzone = 0.01
-local max = 15
-
-
-local function clamp(v)
-    if v > max then return max end
-    if v < -max then return -max end
-    return math.floor(v)
-end
-
+print("Flap controller")
+print("Enter redstone level (0-15)")
+print("Type exit to quit")
 
 while true do
+    write("> ")
+    local input = read()
 
-    local q = ship.getQuaternion()
-    local a = ship.getAngularVelocity()
-
-    local roll = q.v.x
-    local pitch = q.v.z
-
-    if math.abs(roll) < deadzone then roll = 0 end
-    if math.abs(pitch) < deadzone then pitch = 0 end
-
-
-    local r = clamp(
-        roll * rollGain -
-        a.x * rollDamp
-    )
-
-    local p = clamp(
-        pitch * pitchGain -
-        a.z * pitchDamp
-    )
-
-
-    -- ROLL
-    if r > 0 then
-        redstone.setAnalogOutput(rollL, r)
-        redstone.setAnalogOutput(rollR, 0)
-    elseif r < 0 then
-        redstone.setAnalogOutput(rollL, 0)
-        redstone.setAnalogOutput(rollR, -r)
-    else
-        redstone.setAnalogOutput(rollL, 0)
-        redstone.setAnalogOutput(rollR, 0)
+    if input == "exit" then
+        break
     end
 
+    local power = tonumber(input)
 
-    -- PITCH
-    if p > 0 then
-        redstone.setAnalogOutput(pitchF, p)
-        redstone.setAnalogOutput(pitchB, 0)
-    elseif p < 0 then
-        redstone.setAnalogOutput(pitchF, 0)
-        redstone.setAnalogOutput(pitchB, -p)
+    if power and power >= 0 and power <= 15 then
+        redstone.setAnalogOutput(side, power)
+        print("Output set to:", power)
     else
-        redstone.setAnalogOutput(pitchF, 0)
-        redstone.setAnalogOutput(pitchB, 0)
+        print("Invalid value. Use 0-15")
     end
-
-
-    sleep(0.05)
 end
+
+redstone.setAnalogOutput(side, 0)
