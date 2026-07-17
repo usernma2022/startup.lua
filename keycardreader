@@ -1,15 +1,29 @@
-local DOOR_CLEARANCE = 3
-local DOOR_OUTPUT = "back"
-local DOOR_OPEN_TIME = 3
+-- AEGIS Keycard Reader v5.0
 
-local DATABASE = "cards.db"
-local LOG = "access.log"
+local MODEM_SIDE = "left"
+local CHANNEL = 25
+
+local REQUIRED_CLEARANCE = 3
+
+local OUTPUT_SIDE = "back"
+local OPEN_TIME = 3
+
 
 local drive = peripheral.find("drive")
+local modem = peripheral.wrap(MODEM_SIDE)
+
 
 if not drive then
-    error("No disk drive found.")
+    error("No floppy drive found")
 end
+
+if not modem then
+    error("No modem found on "..MODEM_SIDE)
+end
+
+
+modem.open(CHANNEL)
+
 
 
 local function readFile(path)
@@ -23,169 +37,132 @@ local function readFile(path)
     f.close()
 
     return data
+
 end
 
 
-local function loadDatabase()
 
-    if not fs.exists(DATABASE) then
-        return {}
+while true do
+
+    term.clear()
+    term.setCursorPos(1,1)
+
+    print("====================")
+    print("  AEGIS ACCESS")
+    print("====================")
+    print()
+
+    print("Insert keycard...")
+
+
+    while not drive.isDiskPresent() do
+        sleep(0.1)
     end
 
-    local f = fs.open(DATABASE,"r")
-    local data = textutils.unserialize(f.readAll())
-    f.close()
 
-    return data or {}
-end
+    local mount = drive.getMountPath()
 
 
-local function log(text)
-
-    local f = fs.open(LOG,"a")
-    f.writeLine(
-        "["..os.date("%Y-%m-%d %H:%M:%S").."] "..text
-    )
-    f.close()
-
-end
-
-
-term.clear()
-term.setCursorPos(1,1)
-
-print("      AWACS SECURE ACCESS")
-print()
-print("Insert Keycard...")
-
-
-while not drive.isDiskPresent() do
-    sleep(0.1)
-end
-
-
-local mount = drive.getMountPath()
-
-if not mount then
-    error("Unable to mount card.")
-end
-
-
-local cardID = readFile(
-    fs.combine(mount,"auth.dat")
-)
-
-
-if not cardID then
-
-    print()
-    print("Invalid keycard.")
-    log("UNKNOWN CARD - Missing auth.dat")
-
-    drive.ejectDisk()
-    return
-end
-
-
-local database = loadDatabase()
-
-local card = database[cardID]
-
-
-term.clear()
-term.setCursorPos(1,1)
-
-
-print("      AWACS SECURE ACCESS")
-print()
-print("------------------------")
-
-
-local granted = false
-local reason = ""
-
-
-if not card then
-
-    reason = "Unknown card"
-
-elseif card.status ~= "active" then
-
-    reason = "Card revoked"
-
-elseif card.security.clearance < DOOR_CLEARANCE then
-
-    reason = "Insufficient clearance"
-
-else
-
-    granted = true
-
-end
-
-
-
-if card then
-
-    print("Owner:")
-    print(card.card.owner or "Unknown")
-
-    print()
-
-    print("Clearance:")
-    print(card.security.clearance)
-
-    print()
-
-    print("Status:")
-    print(card.status)
-
-else
-
-    print("Card not registered.")
-
-end
-
-
-print()
-print("------------------------")
-
-
-if granted then
-
-    print("ACCESS GRANTED")
-
-    log(
-        "GRANTED "..cardID..
-        " Owner="..card.card.owner
+    local cardID = readFile(
+        fs.combine(mount,"auth.dat")
     )
 
 
-    drive.ejectDisk()
+    if not cardID then
+
+        print()
+        print("Invalid card")
+        drive.ejectDisk()
+        sleep(2)
+
+    else
 
 
-    redstone.setOutput(DOOR_OUTPUT,true)
-
-    sleep(DOOR_OPEN_TIME)
-
-    redstone.setOutput(DOOR_OUTPUT,false)
+        local request = os.getComputerID()
 
 
-else
+        modem.transmit(
+            CHANNEL,
+            CHANNEL,
+            {
+                type = "check_card",
+                request = request,
+                id = cardID,
+                required = REQUIRED_CLEARANCE
+            }
+        )
 
-    print("ACCESS DENIED")
-    print(reason)
 
-    log(
-        "DENIED "..cardID..
-        " Reason="..reason
-    )
+        local result
 
 
-    drive.ejectDisk()
+        while true do
+
+            local _,_,channel,_,msg =
+                os.pullEvent("modem_message")
+
+
+            if channel == CHANNEL
+            and type(msg) == "table"
+            and msg.type == "card_result"
+            and msg.request == request then
+
+                result = msg
+                break
+
+            end
+
+        end
+
+
+
+        term.clear()
+        term.setCursorPos(1,1)
+
+
+        if result.allowed then
+
+            print("ACCESS GRANTED")
+            print()
+
+            print("User:")
+            print(result.owner)
+
+            print()
+
+            print("Clearance:")
+            print(result.clearance)
+
+
+            redstone.setOutput(
+                OUTPUT_SIDE,
+                true
+            )
+
+
+            sleep(OPEN_TIME)
+
+
+            redstone.setOutput(
+                OUTPUT_SIDE,
+                false
+            )
+
+
+        else
+
+            print("ACCESS DENIED")
+            print()
+
+            print(result.reason)
+
+        end
+
+
+        drive.ejectDisk()
+
+        sleep(2)
+
+    end
 
 end
-
-
-print()
-print("Remove keycard.")
