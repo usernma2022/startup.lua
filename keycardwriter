@@ -1,4 +1,5 @@
--- AEGIS Security Server v6.0
+-- AEGIS Security Server v7.0
+-- Part 1/2
 
 local MODEM_SIDE = "left"
 local CHANNEL = 25
@@ -6,11 +7,18 @@ local CHANNEL = 25
 local DATABASE = "cards.db"
 local LOGFILE = "access.log"
 
+local OWNER = "Usernam_"
+
 local modem = peripheral.wrap(MODEM_SIDE)
 local drive = peripheral.find("drive")
+local detector = peripheral.find("playerDetector")
 
 if not modem then
     error("No modem found")
+end
+
+if not detector then
+    error("No player detector found")
 end
 
 modem.open(CHANNEL)
@@ -21,18 +29,26 @@ math.randomseed(os.epoch("utc"))
 local HEX = "0123456789ABCDEF"
 
 
+local facilityActive = false
+
+
+
 local function randomHex(length)
 
     local s = ""
 
     for i = 1,length do
+
         local n = math.random(#HEX)
+
         s = s .. HEX:sub(n,n)
+
     end
 
     return s
 
 end
+
 
 
 local function generateID()
@@ -46,12 +62,18 @@ local function generateID()
 end
 
 
+
 local function loadDatabase()
 
     if fs.exists(DATABASE) then
 
         local f = fs.open(DATABASE,"r")
-        local data = textutils.unserialize(f.readAll())
+
+        local data =
+            textutils.unserialize(
+                f.readAll()
+            )
+
         f.close()
 
         return data or {}
@@ -63,16 +85,23 @@ local function loadDatabase()
 end
 
 
+
 local cards = loadDatabase()
+
 
 
 local function saveDatabase()
 
     local f = fs.open(DATABASE,"w")
-    f.write(textutils.serialize(cards))
+
+    f.write(
+        textutils.serialize(cards)
+    )
+
     f.close()
 
 end
+
 
 
 local function log(text)
@@ -91,34 +120,100 @@ end
 
 
 
+local function checkOwner()
+
+    for _,player in pairs(
+        detector.getOnlinePlayers()
+    ) do
+
+        if player == OWNER then
+            return true
+        end
+
+    end
+
+    return false
+
+end
+
+
+
+local function securityLoop()
+
+    while true do
+
+        local previous = facilityActive
+
+        facilityActive = checkOwner()
+
+
+        if previous ~= facilityActive then
+
+            if facilityActive then
+
+                log(
+                    "FACILITY ONLINE - OWNER PRESENT"
+                )
+
+            else
+
+                log(
+                    "FACILITY OFFLINE - OWNER LEFT"
+                )
+
+            end
+
+        end
+
+
+        sleep(5)
+
+    end
+
+end
+
+
+
 local function writeCard(id,data)
 
     if not drive then
+
         print("No floppy drive attached")
+
         return false
+
     end
 
 
     if not drive.isDiskPresent() then
+
         print("Insert floppy")
+
         return false
+
     end
 
 
-    local mount = drive.getMountPath()
+
+    local mount =
+        drive.getMountPath()
+
 
 
     local function write(name,value)
 
-        local f = fs.open(
-            fs.combine(mount,name),
-            "w"
-        )
+        local f =
+            fs.open(
+                fs.combine(mount,name),
+                "w"
+            )
 
         f.write(value)
+
         f.close()
 
     end
+
 
 
     write(
@@ -130,8 +225,9 @@ local function writeCard(id,data)
     write(
         "security.dat",
         textutils.serialize({
-            clearance=data.security.clearance,
-            version=6
+            clearance =
+                data.security.clearance,
+            version = 7
         })
     )
 
@@ -139,9 +235,14 @@ local function writeCard(id,data)
     write(
         "card.dat",
         textutils.serialize({
-            owner=data.card.owner,
-            issued=data.card.issued,
-            issuer="AEGIS"
+            owner =
+                data.card.owner,
+
+            issued =
+                data.card.issued,
+
+            issuer =
+                "AEGIS"
         })
     )
 
@@ -150,6 +251,8 @@ local function writeCard(id,data)
 
 end
 
+-- AEGIS Security Server v7.0
+-- Part 2/2
 
 
 local function createCard()
@@ -170,9 +273,12 @@ local function createCard()
 
 
     if not clearance or clearance < 1 or clearance > 5 then
+
         print("Invalid clearance")
         sleep(2)
+
         return
+
     end
 
 
@@ -190,19 +296,26 @@ local function createCard()
     cards[id] = {
 
         security = {
+
             clearance = clearance,
-            version = 6
+            version = 7
+
         },
 
+
         card = {
+
             owner = owner,
             issued = os.date("%Y-%m-%d %H:%M:%S"),
             issuer = "AEGIS"
+
         },
+
 
         status = "active"
 
     }
+
 
 
     saveDatabase()
@@ -216,6 +329,7 @@ local function createCard()
     print()
     print("Write floppy? Y/N")
 
+
     if read():lower()=="y" then
 
         if writeCard(id,cards[id]) then
@@ -225,6 +339,7 @@ local function createCard()
         end
 
     end
+
 
 
     log(
@@ -244,6 +359,7 @@ local function viewCards()
     term.clear()
     term.setCursorPos(1,1)
 
+
     print("CARDS")
     print()
 
@@ -254,8 +370,10 @@ local function viewCards()
 
         print(
             c.card.owner..
-            " | Level "..c.security.clearance..
-            " | "..c.status
+            " | Level "..
+            c.security.clearance..
+            " | "..
+            c.status
         )
 
         print()
@@ -274,7 +392,8 @@ local function revoke()
     term.clear()
     term.setCursorPos(1,1)
 
-    local list={}
+
+    local list = {}
 
 
     print("ACTIVE CARDS")
@@ -283,40 +402,60 @@ local function revoke()
 
     for id,c in pairs(cards) do
 
-        if c.status=="active" then
+
+        if c.status == "active" then
+
 
             table.insert(list,id)
 
+
             print(
                 #list..
-                ") "..c.card.owner
+                ") "..
+                c.card.owner
             )
+
 
             print(id)
 
+            print()
+
+
         end
+
 
     end
 
 
-    print()
+
     write("> ")
 
-    local choice=tonumber(read())
+    local choice =
+        tonumber(read())
 
-    local id=list[choice]
+
+    local id =
+        list[choice]
 
 
     if id then
 
-        cards[id].status="revoked"
-        cards[id].security.clearance=0
+
+        cards[id].status = "revoked"
+
+        cards[id].security.clearance = 0
+
 
         saveDatabase()
 
+
         print("Revoked")
 
-        log("REVOKED "..id)
+
+        log(
+            "REVOKED "..id
+        )
+
 
     end
 
@@ -329,20 +468,33 @@ end
 
 local function restore()
 
+
     term.clear()
+    term.setCursorPos(1,1)
+
 
     write("Card ID: ")
 
-    local id=read()
+    local id = read()
+
 
 
     if cards[id] then
 
-        cards[id].status="active"
+
+        cards[id].status = "active"
+
 
         saveDatabase()
 
+
         print("Restored")
+
+
+        log(
+            "RESTORED "..id
+        )
+
 
     else
 
@@ -357,62 +509,130 @@ end
 
 
 
+local function status()
+
+    term.clear()
+    term.setCursorPos(1,1)
+
+
+    print("AEGIS STATUS")
+    print()
+
+
+    if facilityActive then
+
+        print("Facility: ONLINE")
+        print("Owner detected")
+
+    else
+
+        print("Facility: OFFLINE")
+        print("Owner not detected")
+
+    end
+
+
+    print()
+
+    read()
+
+end
+
+
+
 local function network()
 
     while true do
+
 
         local _,_,channel,_,msg =
             os.pullEvent("modem_message")
 
 
-        if channel==CHANNEL
-        and type(msg)=="table" then
+
+        if channel == CHANNEL
+        and type(msg)=="table"
+        and msg.type=="check_card" then
 
 
-            if msg.type=="check_card" then
+
+            local card =
+                cards[msg.id]
 
 
-                local card=cards[msg.id]
+
+            local reply = {
+
+                type="card_result",
+
+                request=msg.request,
+
+                allowed=false
+
+            }
 
 
-                local reply={
-                    type="card_result",
-                    request=msg.request,
-                    allowed=false
-                }
+
+            if not facilityActive then
 
 
-                if card
-                and card.status=="active"
-                and card.security.clearance >= msg.required then
+                reply.reason =
+                    "Facility Offline"
 
 
-                    reply.allowed=true
-                    reply.owner=card.card.owner
-                    reply.clearance=card.security.clearance
-
-
-                    log("ACCESS "..msg.id)
-
-
-                else
-
-                    reply.reason="Denied"
-
-                    log("DENIED "..msg.id)
-
-                end
-
-
-                modem.transmit(
-                    CHANNEL,
-                    CHANNEL,
-                    reply
+                log(
+                    "DENIED OFFLINE "..msg.id
                 )
+
+
+
+            elseif card
+            and card.status=="active"
+            and card.security.clearance >= msg.required then
+
+
+
+                reply.allowed = true
+
+                reply.owner =
+                    card.card.owner
+
+                reply.clearance =
+                    card.security.clearance
+
+
+
+                log(
+                    "ACCESS "..msg.id
+                )
+
+
+
+            else
+
+
+                reply.reason =
+                    "Denied"
+
+
+                log(
+                    "DENIED "..msg.id
+                )
+
 
             end
 
+
+
+            modem.transmit(
+                CHANNEL,
+                CHANNEL,
+                reply
+            )
+
+
         end
+
 
     end
 
@@ -424,38 +644,62 @@ local function menu()
 
     while true do
 
+
         term.clear()
         term.setCursorPos(1,1)
 
+
         print("======== AEGIS ========")
         print()
+
+
         print("1. View Cards")
         print("2. Create Card")
         print("3. Revoke Card")
         print("4. Restore Card")
-        print("5. Exit")
+        print("5. Facility Status")
+        print("6. Exit")
+
+
         print()
 
 
-        local c=read()
+        local c = read()
+
 
 
         if c=="1" then
+
             viewCards()
 
+
         elseif c=="2" then
+
             createCard()
 
+
         elseif c=="3" then
+
             revoke()
 
+
         elseif c=="4" then
+
             restore()
 
+
         elseif c=="5" then
+
+            status()
+
+
+        elseif c=="6" then
+
             error("Shutdown")
 
+
         end
+
 
     end
 
@@ -464,6 +708,11 @@ end
 
 
 parallel.waitForAny(
+
     network,
-    menu
+
+    menu,
+
+    securityLoop
+
 )
