@@ -1,7 +1,9 @@
-
 local DOOR_CLEARANCE = 3
 local DOOR_OUTPUT = "back"
 local DOOR_OPEN_TIME = 3
+
+local DATABASE = "cards.db"
+local LOG = "access.log"
 
 local drive = peripheral.find("drive")
 
@@ -9,22 +11,6 @@ if not drive then
     error("No disk drive found.")
 end
 
-term.clear()
-term.setCursorPos(1,1)
-
-print("      SECURE ACCESS TERMINAL")
-print()
-print("Insert Keycard...")
-
-while not drive.isDiskPresent() do
-    sleep(0.1)
-end
-
-local mount = drive.getMountPath()
-
-if not mount then
-    error("Unable to mount disk.")
-end
 
 local function readFile(path)
 
@@ -33,95 +19,173 @@ local function readFile(path)
     end
 
     local f = fs.open(path,"r")
-
     local data = f.readAll()
-
     f.close()
 
     return data
-
 end
 
-local cardID = readFile(fs.combine(mount,"auth.dat"))
 
-if not cardID then
-    print()
-    print("Invalid keycard.")
-    drive.ejectDisk()
-    return
-end
+local function loadDatabase()
 
-local security = nil
-
-do
-    local txt = readFile(fs.combine(mount,"security.dat"))
-
-    if txt then
-        security = textutils.unserialize(txt)
+    if not fs.exists(DATABASE) then
+        return {}
     end
+
+    local f = fs.open(DATABASE,"r")
+    local data = textutils.unserialize(f.readAll())
+    f.close()
+
+    return data or {}
 end
 
-local card = nil
 
-do
-    local txt = readFile(fs.combine(mount,"card.dat"))
+local function log(text)
 
-    if txt then
-        card = textutils.unserialize(txt)
-    end
+    local f = fs.open(LOG,"a")
+    f.writeLine(
+        "["..os.date("%Y-%m-%d %H:%M:%S").."] "..text
+    )
+    f.close()
+
 end
+
 
 term.clear()
 term.setCursorPos(1,1)
 
-print("      SECURE ACCESS TERMINAL")
+print("      AWACS SECURE ACCESS")
 print()
+print("Insert Keycard...")
 
-print("Card Information")
-print("----------------")
 
-print("Card ID:")
-print(cardID)
-
-print()
-
-print("Clearance : "..tostring(security and security.clearance or "Unknown"))
-
-print("Issued    : "..tostring(card and card.issued or "Unknown"))
-
-print()
-
-local granted = false
-
-if security and security.clearance >= DOOR_CLEARANCE then
-    granted = true
+while not drive.isDiskPresent() do
+    sleep(0.1)
 end
 
-if granted then
 
-    print("Access Granted")
+local mount = drive.getMountPath()
+
+if not mount then
+    error("Unable to mount card.")
+end
+
+
+local cardID = readFile(
+    fs.combine(mount,"auth.dat")
+)
+
+
+if not cardID then
+
     print()
-    print("Welcome.")
+    print("Invalid keycard.")
+    log("UNKNOWN CARD - Missing auth.dat")
 
     drive.ejectDisk()
+    return
+end
 
-    redstone.setOutput(DOOR_OUTPUT, true)
-    sleep(0.2)
-    redstone.setOutput(DOOR_OUTPUT, false)
-    sleep(DOOR_OPEN_TIME)
-    redstone.setOutput(DOOR_OUTPUT, true)
-    sleep(0.2)
-    redstone.setOutput(DOOR_OUTPUT, false)
+
+local database = loadDatabase()
+
+local card = database[cardID]
+
+
+term.clear()
+term.setCursorPos(1,1)
+
+
+print("      AWACS SECURE ACCESS")
+print()
+print("------------------------")
+
+
+local granted = false
+local reason = ""
+
+
+if not card then
+
+    reason = "Unknown card"
+
+elseif card.status ~= "active" then
+
+    reason = "Card revoked"
+
+elseif card.security.clearance < DOOR_CLEARANCE then
+
+    reason = "Insufficient clearance"
 
 else
 
-    print("Access Denied")
+    granted = true
+
+end
+
+
+
+if card then
+
+    print("Owner:")
+    print(card.card.owner or "Unknown")
+
     print()
-    print("Insufficient Clearance.")
+
+    print("Clearance:")
+    print(card.security.clearance)
+
+    print()
+
+    print("Status:")
+    print(card.status)
+
+else
+
+    print("Card not registered.")
+
+end
+
+
+print()
+print("------------------------")
+
+
+if granted then
+
+    print("ACCESS GRANTED")
+
+    log(
+        "GRANTED "..cardID..
+        " Owner="..card.card.owner
+    )
+
+
+    drive.ejectDisk()
+
+
+    redstone.setOutput(DOOR_OUTPUT,true)
+
+    sleep(DOOR_OPEN_TIME)
+
+    redstone.setOutput(DOOR_OUTPUT,false)
+
+
+else
+
+    print("ACCESS DENIED")
+    print(reason)
+
+    log(
+        "DENIED "..cardID..
+        " Reason="..reason
+    )
+
 
     drive.ejectDisk()
 
 end
 
+
 print()
-print("Please take your keycard.")
+print("Remove keycard.")
