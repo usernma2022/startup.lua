@@ -1,9 +1,22 @@
+-- AEGIS Elevator Terminal v2.0
+
+local MODEM_SIDE = "left"
+local CHANNEL = 25
 
 local drive = peripheral.find("drive")
+local modem = peripheral.wrap(MODEM_SIDE)
 
 if not drive then
     error("No disk drive found.")
 end
+
+if not modem then
+    error("No modem found on "..MODEM_SIDE)
+end
+
+modem.open(CHANNEL)
+
+--------------------------------------------------
 
 local currentFloor = 1
 
@@ -15,7 +28,6 @@ local floors = {
         output = "back"
     },
 
-
     ["Factory"] = {
         id = 2,
         clearance = 2,
@@ -24,6 +36,8 @@ local floors = {
 
 }
 
+--------------------------------------------------
+
 local function clear()
 
     term.clear()
@@ -31,17 +45,35 @@ local function clear()
 
 end
 
+local function readFile(path)
+
+    if not fs.exists(path) then
+        return nil
+    end
+
+    local f = fs.open(path,"r")
+    local data = f.readAll()
+    f.close()
+
+    return data
+
+end
+
+--------------------------------------------------
+
 local function waitForCard()
 
     print("Insert keycard...")
 
     while not drive.isDiskPresent() do
-        sleep(1)
+        sleep(0.1)
     end
 
 end
 
-local function getClearance()
+--------------------------------------------------
+
+local function authenticate()
 
     local mount = drive.getMountPath()
 
@@ -49,241 +81,181 @@ local function getClearance()
         return nil
     end
 
+    local cardID = readFile(
+        fs.combine(mount,"auth.dat")
+    )
 
-    local path =
-        fs.combine(
-            mount,
-            "security.dat"
-        )
-
-
-    if not fs.exists(path) then
+    if not cardID then
         return nil
     end
 
+    local request = os.getComputerID()
 
-    local file =
-        fs.open(path,"r")
+    modem.transmit(
+        CHANNEL,
+        CHANNEL,
+        {
+            type = "check_card",
+            request = request,
+            id = cardID,
+            required = 1
+        }
+    )
 
+    while true do
 
-    local data =
-        textutils.unserialize(
-            file.readAll()
-        )
+        local _,_,channel,_,msg =
+            os.pullEvent("modem_message")
 
+        if channel == CHANNEL
+        and type(msg) == "table"
+        and msg.type == "card_result"
+        and msg.request == request then
 
-    file.close()
+            if msg.allowed then
+                return msg
+            else
+                return nil
+            end
 
+        end
 
-    if data then
-        return data.clearance
     end
-
-
-    return nil
 
 end
 
-
+--------------------------------------------------
 
 local function ejectCard()
 
     drive.ejectDisk()
 
-    print()
-    print("Remove card.")
-
-    while drive.isDiskPresent() do
-        sleep(1)
-    end
-
 end
 
-
+--------------------------------------------------
 
 local function callElevator(destination)
 
-    local floor =
-        floors[destination]
+    local floor = floors[destination]
 
+    clear()
 
+    print("Calling Elevator")
     print()
-    print(
-        "Calling elevator:"
-    )
-
     print(destination)
-
 
     redstone.setOutput(
         floor.output,
         true
     )
 
-
     sleep(1)
-
 
     redstone.setOutput(
         floor.output,
         false
     )
 
+    sleep(3)
 
 end
 
-
+--------------------------------------------------
 
 local function selectFloor(clearance)
-
 
     while true do
 
         clear()
 
-
-        print(" ELEVATOR CONTROL TERMINAL")
+        print("AEGIS Elevator")
         print()
-
 
         local options = {}
         local count = 1
 
-
         for name,data in pairs(floors) do
 
+            if data.id ~= currentFloor
+            and clearance >= data.clearance then
 
-            -- Hide current floor
+                options[count] = name
 
-            if data.id ~= currentFloor then
+                print(
+                    count..
+                    ". "..name
+                )
 
-
-                if clearance >= data.clearance then
-
-
-                    options[count] = name
-
-
-                    print(
-                        count..
-                        ". "..
-                        name
-                    )
-
-
-                    count = count + 1
-
-
-                end
+                count = count + 1
 
             end
 
         end
 
-
         if #options == 0 then
 
-            print(
-                "No available floors."
-            )
+            print("No accessible floors.")
 
             sleep(3)
 
             return
 
         end
-
-
 
         print()
 
-        write(
-            "Select floor: "
-        )
+        write("Select Floor: ")
 
+        local input = tonumber(read())
 
-        local input =
-            tonumber(
-                read()
-            )
-
-
-        local selected =
-            options[input]
-
+        local selected = options[input]
 
         if selected then
 
-            callElevator(
-                selected
-            )
-
-            sleep(3)
+            callElevator(selected)
 
             return
 
-        else
-
-            print(
-                "Invalid selection."
-            )
-
-            sleep(2)
-
         end
+
+        print()
+
+        print("Invalid selection.")
+
+        sleep(2)
 
     end
 
 end
 
+--------------------------------------------------
+
 while true do
 
     clear()
 
-
-    print(" ELEVATOR CONTROL TERMINAL")
+    print("AEGIS Elevator")
     print()
-
 
     waitForCard()
 
-
-    local clearance =
-        getClearance()
-
+    local auth = authenticate()
 
     ejectCard()
 
+    if auth then
 
-
-    if clearance then
-
-
-        print(
-            "Clearance Level: "
-            ..
-            clearance
-        )
-
+        print("Welcome "..auth.owner)
 
         sleep(1)
 
-
-        selectFloor(
-            clearance
-        )
-
+        selectFloor(auth.clearance)
 
     else
 
+        print("ACCESS DENIED")
 
-        print(
-            "INVALID CARD"
-        )
-
-
-        sleep(3)
-
+        sleep(2)
 
     end
 
