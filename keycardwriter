@@ -1,259 +1,221 @@
+-- AEGIS Keycard Writer v3.0
+
+local drive = peripheral.find("drive")
 local DATABASE = "cards.db"
 
 local HEX = "0123456789ABCDEF"
 
-local function randomHex(length)
-    local s = ""
-    for i = 1, length do
-        local n = math.random(#HEX)
-        s = s .. HEX:sub(n,n)
-    end
-    return s
+if not drive then
+    error("No disk drive found.")
 end
+
+
+if not drive.isDiskPresent() then
+    error("Insert a floppy disk first.")
+end
+
+
+local mount = drive.getMountPath()
+
+if not mount then
+    error("Unable to mount disk.")
+end
+
 
 math.randomseed(os.epoch("utc"))
 
+
+local function randomHex(length)
+
+    local s = ""
+
+    for i = 1,length do
+        local n = math.random(#HEX)
+        s = s .. HEX:sub(n,n)
+    end
+
+    return s
+end
+
+
 local function generateID()
+
     return randomHex(8).."-"..
            randomHex(4).."-"..
            randomHex(4).."-"..
            randomHex(4).."-"..
            randomHex(12)
+
 end
 
 
-local cards = {}
+local function loadDatabase()
 
-if fs.exists(DATABASE) then
+    if not fs.exists(DATABASE) then
+        return {}
+    end
+
     local f = fs.open(DATABASE,"r")
-    cards = textutils.unserialize(f.readAll()) or {}
+    local data = textutils.unserialize(f.readAll())
     f.close()
+
+    return data or {}
 end
 
 
-local function save()
+local function saveDatabase(data)
+
     local f = fs.open(DATABASE,"w")
-    f.write(textutils.serialize(cards))
+    f.write(textutils.serialize(data))
     f.close()
+
 end
 
 
-local function clear()
-    term.clear()
-    term.setCursorPos(1,1)
+local function writeFile(path,data)
+
+    local f = fs.open(path,"w")
+    f.write(data)
+    f.close()
+
 end
 
 
-local function pause()
-    print("\nPress ENTER")
-    read()
+term.clear()
+term.setCursorPos(1,1)
+
+print("================================")
+print("       AEGIS KEYCARD WRITER")
+print("================================")
+print()
+
+
+write("Owner: ")
+local owner = read()
+
+
+write("Clearance (1-5): ")
+local clearance = tonumber(read())
+
+
+if not clearance or clearance < 1 or clearance > 5 then
+    error("Invalid clearance.")
 end
 
 
-local function register()
 
-    clear()
-    print("REGISTER CARD")
-    print()
+local database = loadDatabase()
 
-    write("Owner: ")
-    local owner = read()
+local id
 
-    write("Clearance (1-5): ")
-    local level = tonumber(read())
+repeat
+    id = generateID()
+until not database[id]
 
-    if not level or level < 1 or level > 5 then
-        print("Invalid clearance")
-        pause()
-        return
+
+
+database[id] = {
+
+    auth = id,
+
+    security = {
+        clearance = clearance,
+        version = 3
+    },
+
+    card = {
+        owner = owner,
+        issued = os.date("%Y-%m-%d %H:%M:%S"),
+        issuer = "AEGIS Security Division"
+    },
+
+    status = "active"
+
+}
+
+
+saveDatabase(database)
+
+
+
+-- Remove old card files
+
+for _,file in ipairs({
+    "auth.dat",
+    "security.dat",
+    "card.dat"
+}) do
+
+    local path = fs.combine(mount,file)
+
+    if fs.exists(path) then
+        fs.delete(path)
     end
 
-    local id = generateID()
-
-    cards[id] = {
-        auth = id,
-
-        security = {
-            clearance = level,
-            version = 2
-        },
-
-        card = {
-            owner = owner,
-            issued = os.date("%Y-%m-%d %H:%M:%S"),
-            issuer = "AWACS Security Division"
-        },
-
-        status = "active"
-    }
-
-    save()
-
-    print()
-    print("CARD CREATED")
-    print("ID:")
-    print(id)
-    print("Clearance:",level)
-
-    pause()
 end
 
 
-local function list()
 
-    clear()
-    print("CARDS")
-    print()
+-- Write authentication
 
-    local amount = 0
-
-    for id,c in pairs(cards) do
-        amount = amount + 1
-
-        print(id)
-        print("Owner:",c.card.owner)
-        print("Clearance:",c.security.clearance)
-        print("Status:",c.status)
-        print()
-    end
-
-    if amount == 0 then
-        print("No cards")
-    end
-
-    pause()
-end
+writeFile(
+    fs.combine(mount,"auth.dat"),
+    id
+)
 
 
-local function revoke()
 
-    clear()
-    print("REVOKE CARD")
-    print()
+-- Write security data
 
-    local valid = {}
-
-    for id,c in pairs(cards) do
-        if c.status == "active" then
-            table.insert(valid,id)
-        end
-    end
-
-    if #valid == 0 then
-        print("No active cards")
-        pause()
-        return
-    end
+writeFile(
+    fs.combine(mount,"security.dat"),
+    textutils.serialize({
+        clearance = clearance,
+        version = 3
+    })
+)
 
 
-    for i,id in ipairs(valid) do
-        local c = cards[id]
-        print(i..") "..c.card.owner)
-        print("   "..id)
-        print("   Clearance "..c.security.clearance)
-        print()
-    end
+
+-- Write card data
+
+writeFile(
+    fs.combine(mount,"card.dat"),
+    textutils.serialize({
+        owner = owner,
+        issued = os.date("%Y-%m-%d %H:%M:%S"),
+        issuer = "AEGIS Security Division"
+    })
+)
 
 
-    write("Select card: ")
-    local choice = tonumber(read())
 
-    local id = valid[choice]
+term.clear()
+term.setCursorPos(1,1)
 
-    if id then
-        cards[id].status = "revoked"
-        cards[id].security.clearance = 0
+print("================================")
+print("       CARD CREATED")
+print("================================")
 
-        save()
+print()
 
-        print("Card revoked")
-    else
-        print("Invalid choice")
-    end
+print("Owner:")
+print(owner)
 
-    pause()
-end
+print()
 
+print("Card ID:")
+print(id)
 
-local function restore()
+print()
 
-    clear()
-    print("RESTORE CARD")
-    print()
+print("Clearance:")
+print(clearance)
 
-    write("Card ID: ")
-    local id = read()
+print()
 
-    if cards[id] then
-        cards[id].status = "active"
-        save()
-        print("Restored")
-    else
-        print("Not found")
-    end
+print("Database updated.")
+print("Card ready.")
 
-    pause()
-end
-
-
-local function search()
-
-    clear()
-    print("SEARCH")
-
-    write("Card ID: ")
-    local id = read()
-
-    local c = cards[id]
-
-    if c then
-        print()
-        print("Owner:",c.card.owner)
-        print("Clearance:",c.security.clearance)
-        print("Status:",c.status)
-        print("Issued:",c.card.issued)
-    else
-        print("Not found")
-    end
-
-    pause()
-end
-
-
-while true do
-
-    clear()
-
-    print("AWACS CARD DATABASE")
-    print()
-    print("1. View cards")
-    print("2. Register card")
-    print("3. Revoke card")
-    print("4. Restore card")
-    print("5. Search")
-    print("6. Exit")
-    print()
-
-    write("> ")
-    local c = read()
-
-
-    if c == "1" then
-        list()
-
-    elseif c == "2" then
-        register()
-
-    elseif c == "3" then
-        revoke()
-
-    elseif c == "4" then
-        restore()
-
-    elseif c == "5" then
-        search()
-
-    elseif c == "6" then
-        break
-    end
-end
+print()
+print("Remove floppy.")
