@@ -1,32 +1,42 @@
---------------------------------------------------
--- AWACS Card Database Manager v1.0
---------------------------------------------------
-
 local DATABASE = "cards.db"
 
---------------------------------------------------
--- Load Database
---------------------------------------------------
+local HEX = "0123456789ABCDEF"
+
+local function randomHex(length)
+    local s = ""
+    for i = 1, length do
+        local n = math.random(#HEX)
+        s = s .. HEX:sub(n,n)
+    end
+    return s
+end
+
+math.randomseed(os.epoch("utc"))
+
+local function generateID()
+    return randomHex(8).."-"..
+           randomHex(4).."-"..
+           randomHex(4).."-"..
+           randomHex(4).."-"..
+           randomHex(12)
+end
+
 
 local cards = {}
 
 if fs.exists(DATABASE) then
-    local file = fs.open(DATABASE, "r")
-    cards = textutils.unserialize(file.readAll()) or {}
-    file.close()
+    local f = fs.open(DATABASE,"r")
+    cards = textutils.unserialize(f.readAll()) or {}
+    f.close()
 end
 
 
 local function save()
-    local file = fs.open(DATABASE, "w")
-    file.write(textutils.serialize(cards))
-    file.close()
+    local f = fs.open(DATABASE,"w")
+    f.write(textutils.serialize(cards))
+    f.close()
 end
 
-
---------------------------------------------------
--- Utility
---------------------------------------------------
 
 local function clear()
     term.clear()
@@ -35,297 +45,215 @@ end
 
 
 local function pause()
-    print()
-    print("Press ENTER...")
+    print("\nPress ENTER")
     read()
 end
 
 
---------------------------------------------------
--- Add Card
---------------------------------------------------
-
-local function addCard()
+local function register()
 
     clear()
-
-    print("ADD CARD")
-    print("----------------")
-
-    write("Card ID: ")
-    local id = read()
-
-    if cards[id] then
-        print("Card already exists.")
-        pause()
-        return
-    end
-
+    print("REGISTER CARD")
+    print()
 
     write("Owner: ")
     local owner = read()
 
-
     write("Clearance (1-5): ")
-    local clearance = tonumber(read())
+    local level = tonumber(read())
 
-
-    if not clearance or clearance < 1 or clearance > 5 then
-        print("Invalid clearance.")
+    if not level or level < 1 or level > 5 then
+        print("Invalid clearance")
         pause()
         return
     end
 
+    local id = generateID()
 
     cards[id] = {
-        owner = owner,
-        clearance = clearance,
-        status = "active",
-        created = os.date("%Y-%m-%d %H:%M:%S")
-    }
+        auth = id,
 
+        security = {
+            clearance = level,
+            version = 2
+        },
+
+        card = {
+            owner = owner,
+            issued = os.date("%Y-%m-%d %H:%M:%S"),
+            issuer = "AWACS Security Division"
+        },
+
+        status = "active"
+    }
 
     save()
 
     print()
-    print("Card registered.")
+    print("CARD CREATED")
+    print("ID:")
+    print(id)
+    print("Clearance:",level)
+
     pause()
 end
 
 
---------------------------------------------------
--- View Cards
---------------------------------------------------
-
-local function listCards()
+local function list()
 
     clear()
+    print("CARDS")
+    print()
 
-    print("REGISTERED CARDS")
-    print("----------------")
+    local amount = 0
 
-    local count = 0
+    for id,c in pairs(cards) do
+        amount = amount + 1
 
-    for id,data in pairs(cards) do
-
-        count = count + 1
-
-        print()
         print(id)
-        print(" Owner: "..data.owner)
-        print(" Clearance: "..data.clearance)
-        print(" Status: "..data.status)
-
+        print("Owner:",c.card.owner)
+        print("Clearance:",c.security.clearance)
+        print("Status:",c.status)
+        print()
     end
 
-
-    if count == 0 then
-        print("No cards registered.")
+    if amount == 0 then
+        print("No cards")
     end
 
     pause()
 end
 
-
---------------------------------------------------
--- Revoke
---------------------------------------------------
 
 local function revoke()
 
     clear()
-
     print("REVOKE CARD")
-    print("----------------")
+    print()
 
-    write("Card ID: ")
-    local id = read()
+    local valid = {}
 
-
-    if cards[id] then
-
-        cards[id].status = "revoked"
-
-        save()
-
-        print("Card revoked.")
-
-    else
-
-        print("Card not found.")
-
+    for id,c in pairs(cards) do
+        if c.status == "active" then
+            table.insert(valid,id)
+        end
     end
 
-    pause()
-end
-
-
---------------------------------------------------
--- Restore
---------------------------------------------------
-
-local function restore()
-
-    clear()
-
-    print("RESTORE CARD")
-    print("----------------")
-
-    write("Card ID: ")
-    local id = read()
-
-
-    if cards[id] then
-
-        cards[id].status = "active"
-
-        save()
-
-        print("Card restored.")
-
-    else
-
-        print("Card not found.")
-
-    end
-
-    pause()
-end
-
-
---------------------------------------------------
--- Change Clearance
---------------------------------------------------
-
-local function clearance()
-
-    clear()
-
-    print("CHANGE CLEARANCE")
-    print("----------------")
-
-    write("Card ID: ")
-    local id = read()
-
-
-    if not cards[id] then
-        print("Card not found.")
+    if #valid == 0 then
+        print("No active cards")
         pause()
         return
     end
 
 
-    write("New level (0-5): ")
+    for i,id in ipairs(valid) do
+        local c = cards[id]
+        print(i..") "..c.card.owner)
+        print("   "..id)
+        print("   Clearance "..c.security.clearance)
+        print()
+    end
 
-    local level = tonumber(read())
 
+    write("Select card: ")
+    local choice = tonumber(read())
 
-    if level and level >= 0 and level <= 5 then
+    local id = valid[choice]
 
-        cards[id].clearance = level
-
-        if level == 0 then
-            cards[id].status = "revoked"
-        end
+    if id then
+        cards[id].status = "revoked"
+        cards[id].security.clearance = 0
 
         save()
 
-        print("Updated.")
-
+        print("Card revoked")
     else
-
-        print("Invalid level.")
-
+        print("Invalid choice")
     end
 
     pause()
 end
 
 
---------------------------------------------------
--- Search
---------------------------------------------------
-
-local function search()
+local function restore()
 
     clear()
-
-    print("SEARCH CARD")
-    print("----------------")
+    print("RESTORE CARD")
+    print()
 
     write("Card ID: ")
     local id = read()
 
-
     if cards[id] then
-
-        local c = cards[id]
-
-        print()
-        print("Owner: "..c.owner)
-        print("Clearance: "..c.clearance)
-        print("Status: "..c.status)
-        print("Created: "..c.created)
-
+        cards[id].status = "active"
+        save()
+        print("Restored")
     else
-
-        print("Not found.")
-
+        print("Not found")
     end
 
     pause()
 end
 
 
---------------------------------------------------
--- Main Menu
---------------------------------------------------
+local function search()
+
+    clear()
+    print("SEARCH")
+
+    write("Card ID: ")
+    local id = read()
+
+    local c = cards[id]
+
+    if c then
+        print()
+        print("Owner:",c.card.owner)
+        print("Clearance:",c.security.clearance)
+        print("Status:",c.status)
+        print("Issued:",c.card.issued)
+    else
+        print("Not found")
+    end
+
+    pause()
+end
+
 
 while true do
 
     clear()
 
-    print("================================")
-    print("      AWACS CARD DATABASE")
-    print("================================")
+    print("AWACS CARD DATABASE")
     print()
-
     print("1. View cards")
     print("2. Register card")
     print("3. Revoke card")
     print("4. Restore card")
-    print("5. Change clearance")
-    print("6. Search card")
-    print("7. Exit")
-
+    print("5. Search")
+    print("6. Exit")
     print()
 
     write("> ")
+    local c = read()
 
-    local choice = read()
 
+    if c == "1" then
+        list()
 
-    if choice == "1" then
-        listCards()
+    elseif c == "2" then
+        register()
 
-    elseif choice == "2" then
-        addCard()
-
-    elseif choice == "3" then
+    elseif c == "3" then
         revoke()
 
-    elseif choice == "4" then
+    elseif c == "4" then
         restore()
 
-    elseif choice == "5" then
-        clearance()
-
-    elseif choice == "6" then
+    elseif c == "5" then
         search()
 
-    elseif choice == "7" then
+    elseif c == "6" then
         break
-
     end
-
 end
