@@ -1,11 +1,11 @@
--- AEGIS Keycard Reader v5.0
+-- AEGIS Keycard Reader v6.0
 
 local MODEM_SIDE = "left"
 local CHANNEL = 25
 
 local REQUIRED_CLEARANCE = 3
 
-local OUTPUT_SIDE = "back"
+local DOOR_OUTPUT = "back"
 local OPEN_TIME = 3
 
 
@@ -18,7 +18,7 @@ if not drive then
 end
 
 if not modem then
-    error("No modem found on "..MODEM_SIDE)
+    error("No modem found")
 end
 
 
@@ -42,22 +42,32 @@ end
 
 
 
+local function eject()
+
+    if drive.isDiskPresent() then
+        drive.ejectDisk()
+    end
+
+end
+
+
+
 while true do
 
     term.clear()
     term.setCursorPos(1,1)
 
     print("====================")
-    print("  AEGIS ACCESS")
+    print("   AEGIS ACCESS")
     print("====================")
     print()
-
-    print("Insert keycard...")
+    print("Insert keycard")
 
 
     while not drive.isDiskPresent() do
         sleep(0.1)
     end
+
 
 
     local mount = drive.getMountPath()
@@ -71,98 +81,105 @@ while true do
     if not cardID then
 
         print()
-        print("Invalid card")
-        drive.ejectDisk()
+        print("INVALID CARD")
+
+        eject()
+
         sleep(2)
 
-    else
+        os.reboot()
+
+    end
 
 
-        local request = os.getComputerID()
+
+    local request = os.getComputerID()
 
 
-        modem.transmit(
-            CHANNEL,
-            CHANNEL,
-            {
-                type = "check_card",
-                request = request,
-                id = cardID,
-                required = REQUIRED_CLEARANCE
-            }
+    modem.transmit(
+        CHANNEL,
+        CHANNEL,
+        {
+            type="check_card",
+            request=request,
+            id=cardID,
+            required=REQUIRED_CLEARANCE
+        }
+    )
+
+
+
+    local result
+
+
+    while true do
+
+        local _,_,channel,_,msg =
+            os.pullEvent("modem_message")
+
+
+        if channel==CHANNEL
+        and type(msg)=="table"
+        and msg.type=="card_result"
+        and msg.request==request then
+
+            result=msg
+            break
+
+        end
+
+    end
+
+
+
+    term.clear()
+    term.setCursorPos(1,1)
+
+
+
+    if result.allowed then
+
+        print("ACCESS GRANTED")
+        print()
+        print(result.owner)
+        print("Clearance "..result.clearance)
+
+
+        -- Pulse door
+
+        redstone.setOutput(
+            DOOR_OUTPUT,
+            true
         )
 
 
-        local result
+        eject()
 
 
-        while true do
-
-            local _,_,channel,_,msg =
-                os.pullEvent("modem_message")
+        sleep(OPEN_TIME)
 
 
-            if channel == CHANNEL
-            and type(msg) == "table"
-            and msg.type == "card_result"
-            and msg.request == request then
-
-                result = msg
-                break
-
-            end
-
-        end
+        redstone.setOutput(
+            DOOR_OUTPUT,
+            false
+        )
 
 
+    else
 
-        term.clear()
-        term.setCursorPos(1,1)
-
-
-        if result.allowed then
-
-            print("ACCESS GRANTED")
-            print()
-
-            print("User:")
-            print(result.owner)
-
-            print()
-
-            print("Clearance:")
-            print(result.clearance)
+        print("ACCESS DENIED")
+        print()
+        print(result.reason)
 
 
-            redstone.setOutput(
-                OUTPUT_SIDE,
-                true
-            )
-
-
-            sleep(OPEN_TIME)
-
-
-            redstone.setOutput(
-                OUTPUT_SIDE,
-                false
-            )
-
-
-        else
-
-            print("ACCESS DENIED")
-            print()
-
-            print(result.reason)
-
-        end
-
-
-        drive.ejectDisk()
-
-        sleep(2)
+        eject()
 
     end
+
+
+
+    sleep(1)
+
+    os.reboot()
 
 end
