@@ -1,28 +1,24 @@
--- AEGIS Keycard Writer v3.0
+-- AEGIS Security Server v5.0
 
-local drive = peripheral.find("drive")
+local MODEM_SIDE = "left"
+local CHANNEL = 25
+
 local DATABASE = "cards.db"
+local LOGFILE = "access.log"
 
-local HEX = "0123456789ABCDEF"
 
-if not drive then
-    error("No disk drive found.")
+local modem = peripheral.wrap(MODEM_SIDE)
+
+if not modem then
+    error("No modem found on "..MODEM_SIDE)
 end
 
-
-if not drive.isDiskPresent() then
-    error("Insert a floppy disk first.")
-end
-
-
-local mount = drive.getMountPath()
-
-if not mount then
-    error("Unable to mount disk.")
-end
+modem.open(CHANNEL)
 
 
 math.randomseed(os.epoch("utc"))
+
+local HEX = "0123456789ABCDEF"
 
 
 local function randomHex(length)
@@ -60,162 +56,411 @@ local function loadDatabase()
     f.close()
 
     return data or {}
+
 end
 
 
-local function saveDatabase(data)
+local cards = loadDatabase()
+
+
+local function saveDatabase()
 
     local f = fs.open(DATABASE,"w")
-    f.write(textutils.serialize(data))
+    f.write(textutils.serialize(cards))
     f.close()
 
 end
 
 
-local function writeFile(path,data)
+local function log(text)
 
-    local f = fs.open(path,"w")
-    f.write(data)
+    local f = fs.open(LOGFILE,"a")
+
+    f.writeLine(
+        "["..
+        os.date("%Y-%m-%d %H:%M:%S")..
+        "] "..text
+    )
+
     f.close()
 
 end
 
 
-term.clear()
-term.setCursorPos(1,1)
 
-print("================================")
-print("       AEGIS KEYCARD WRITER")
-print("================================")
-print()
+local function createCard(msg)
 
+    local id
 
-write("Owner: ")
-local owner = read()
+    repeat
+        id = generateID()
+    until not cards[id]
 
 
-write("Clearance (1-5): ")
-local clearance = tonumber(read())
+    cards[id] = {
+
+        security = {
+            clearance = msg.clearance,
+            version = 5
+        },
+
+        card = {
+            owner = msg.owner,
+            issued = os.date("%Y-%m-%d %H:%M:%S"),
+            issuer = "AEGIS"
+        },
+
+        status = "active"
+
+    }
 
 
-if not clearance or clearance < 1 or clearance > 5 then
-    error("Invalid clearance.")
+    saveDatabase()
+
+
+    modem.transmit(
+        CHANNEL,
+        CHANNEL,
+        {
+            type="card_created",
+            request=msg.request,
+            id=id,
+            owner=msg.owner,
+            clearance=msg.clearance
+        }
+    )
+
+
+    log(
+        "CARD CREATED "..id..
+        " OWNER "..msg.owner
+    )
+
 end
 
 
 
-local database = loadDatabase()
+local function checkCard(msg)
 
-local id
+    local result = {
 
-repeat
-    id = generateID()
-until not database[id]
+        type="card_result",
+        request=msg.request,
+        allowed=false
 
-
-
-database[id] = {
-
-    auth = id,
-
-    security = {
-        clearance = clearance,
-        version = 3
-    },
-
-    card = {
-        owner = owner,
-        issued = os.date("%Y-%m-%d %H:%M:%S"),
-        issuer = "AEGIS Security Division"
-    },
-
-    status = "active"
-
-}
+    }
 
 
-saveDatabase(database)
+    local card = cards[msg.id]
+
+
+    if not card then
+
+        result.reason="Unknown card"
+
+
+    elseif card.status ~= "active" then
+
+        result.reason="Card revoked"
+
+
+    elseif card.security.clearance < msg.required then
+
+        result.reason="Insufficient clearance"
+
+
+    else
+
+        result.allowed=true
+        result.owner=card.card.owner
+        result.clearance=card.security.clearance
+
+    end
 
 
 
--- Remove old card files
+    if result.allowed then
 
-for _,file in ipairs({
-    "auth.dat",
-    "security.dat",
-    "card.dat"
-}) do
+        log(
+            "ACCESS GRANTED "..msg.id..
+            " "..result.owner
+        )
 
-    local path = fs.combine(mount,file)
+    else
 
-    if fs.exists(path) then
-        fs.delete(path)
+        log(
+            "ACCESS DENIED "..msg.id..
+            " "..result.reason
+        )
+
+    end
+
+
+    modem.transmit(
+        CHANNEL,
+        CHANNEL,
+        result
+    )
+
+end
+
+
+
+local function networkLoop()
+
+    while true do
+
+        local _,_,channel,_,msg =
+            os.pullEvent("modem_message")
+
+
+        if channel == CHANNEL
+        and type(msg)=="table" then
+
+
+            if msg.type=="create_card" then
+
+                createCard(msg)
+
+
+            elseif msg.type=="check_card" then
+
+                checkCard(msg)
+
+            end
+
+        end
+
     end
 
 end
 
 
 
--- Write authentication
+local function showCards()
 
-writeFile(
-    fs.combine(mount,"auth.dat"),
-    id
+    term.clear()
+    term.setCursorPos(1,1)
+
+    print("AEGIS CARD DATABASE")
+    print()
+
+
+    for id,c in pairs(cards) do
+
+        print(id)
+
+        print(
+            c.card.owner..
+            " | Clearance: "..
+            c.security.clearance..
+            " | "..c.status
+        )
+
+        print()
+
+    end
+
+
+    print("Press ENTER")
+
+    read()
+
+end
+
+
+
+local function revokeCard()
+
+    term.clear()
+    term.setCursorPos(1,1)
+
+    print("ACTIVE CARDS")
+    print()
+
+
+    local list={}
+
+
+    for id,c in pairs(cards) do
+
+        if c.status=="active" then
+
+            table.insert(list,id)
+
+            print(
+                #list..
+                ") "..
+                c.card.owner
+            )
+
+            print(id)
+            print()
+
+        end
+
+    end
+
+
+    print("Select:")
+
+    local choice = tonumber(read())
+
+
+    local id = list[choice]
+
+
+    if id then
+
+        cards[id].status="revoked"
+        cards[id].security.clearance=0
+
+        saveDatabase()
+
+        print("Card revoked")
+
+    end
+
+
+    sleep(2)
+
+end
+
+
+
+local function restoreCard()
+
+    term.clear()
+    term.setCursorPos(1,1)
+
+
+    write("Card ID: ")
+
+    local id = read()
+
+
+    if cards[id] then
+
+        cards[id].status="active"
+
+        saveDatabase()
+
+        print("Restored")
+
+    else
+
+        print("Not found")
+
+    end
+
+
+    sleep(2)
+
+end
+
+
+
+local function changeClearance()
+
+    term.clear()
+    term.setCursorPos(1,1)
+
+
+    write("Card ID: ")
+
+    local id = read()
+
+
+    if not cards[id] then
+
+        print("Not found")
+        sleep(2)
+        return
+
+    end
+
+
+    write("New clearance: ")
+
+    local level = tonumber(read())
+
+
+    if level and level >=0 and level<=5 then
+
+        cards[id].security.clearance=level
+
+        if level==0 then
+            cards[id].status="revoked"
+        end
+
+        saveDatabase()
+
+        print("Updated")
+
+    end
+
+
+    sleep(2)
+
+end
+
+
+
+local function adminLoop()
+
+    while true do
+
+        term.clear()
+        term.setCursorPos(1,1)
+
+        print("====================")
+        print(" AEGIS SECURITY")
+        print("====================")
+        print()
+        print("1. View cards")
+        print("2. Revoke card")
+        print("3. Restore card")
+        print("4. Change clearance")
+        print("5. Exit")
+        print()
+
+
+        local choice = read()
+
+
+        if choice=="1" then
+
+            showCards()
+
+
+        elseif choice=="2" then
+
+            revokeCard()
+
+
+        elseif choice=="3" then
+
+            restoreCard()
+
+
+        elseif choice=="4" then
+
+            changeClearance()
+
+
+        elseif choice=="5" then
+
+            error("Server stopped")
+
+        end
+
+    end
+
+end
+
+
+
+parallel.waitForAny(
+    networkLoop,
+    adminLoop
 )
-
-
-
--- Write security data
-
-writeFile(
-    fs.combine(mount,"security.dat"),
-    textutils.serialize({
-        clearance = clearance,
-        version = 3
-    })
-)
-
-
-
--- Write card data
-
-writeFile(
-    fs.combine(mount,"card.dat"),
-    textutils.serialize({
-        owner = owner,
-        issued = os.date("%Y-%m-%d %H:%M:%S"),
-        issuer = "AEGIS Security Division"
-    })
-)
-
-
-
-term.clear()
-term.setCursorPos(1,1)
-
-print("================================")
-print("       CARD CREATED")
-print("================================")
-
-print()
-
-print("Owner:")
-print(owner)
-
-print()
-
-print("Card ID:")
-print(id)
-
-print()
-
-print("Clearance:")
-print(clearance)
-
-print()
-
-print("Database updated.")
-print("Card ready.")
-
-print()
-print("Remove floppy.")
