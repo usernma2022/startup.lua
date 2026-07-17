@@ -1,34 +1,3 @@
-local PASSWORD = "Username"
-
-local oldPullEvent = os.pullEventRaw
-
-os.pullEventRaw = function(filter)
-
-    local event = {oldPullEvent(filter)}
-
-    if event[1] == "terminate" then
-
-        term.clear()
-        term.setCursorPos(1,1)
-
-        term.write("Password: ")
-
-        local input = read("*")
-
-        if input ~= PASSWORD then
-
-            print("ACCESS DENIED")
-
-            return os.pullEventRaw(filter)
-
-        end
-
-    end
-
-    return table.unpack(event)
-
-end
-
 local detector = peripheral.find("playerDetector")
 local modem = peripheral.find("modem")
 
