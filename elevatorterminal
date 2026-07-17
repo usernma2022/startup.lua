@@ -1,467 +1,290 @@
--- AEGIS Security Server v5.0
 
-local MODEM_SIDE = "left"
-local CHANNEL = 25
+local drive = peripheral.find("drive")
 
-local DATABASE = "cards.db"
-local LOGFILE = "access.log"
-
-
-local modem = peripheral.wrap(MODEM_SIDE)
-
-if not modem then
-    error("No modem found on "..MODEM_SIDE)
+if not drive then
+    error("No disk drive found.")
 end
 
-modem.open(CHANNEL)
+local currentFloor = 1
+
+local floors = {
+
+    ["Surface"] = {
+        id = 1,
+        clearance = 1,
+        output = "back"
+    },
 
 
-math.randomseed(os.epoch("utc"))
-
-local HEX = "0123456789ABCDEF"
-
-
-local function randomHex(length)
-
-    local s = ""
-
-    for i = 1,length do
-        local n = math.random(#HEX)
-        s = s .. HEX:sub(n,n)
-    end
-
-    return s
-end
-
-
-local function generateID()
-
-    return randomHex(8).."-"..
-           randomHex(4).."-"..
-           randomHex(4).."-"..
-           randomHex(4).."-"..
-           randomHex(12)
-
-end
-
-
-local function loadDatabase()
-
-    if not fs.exists(DATABASE) then
-        return {}
-    end
-
-    local f = fs.open(DATABASE,"r")
-    local data = textutils.unserialize(f.readAll())
-    f.close()
-
-    return data or {}
-
-end
-
-
-local cards = loadDatabase()
-
-
-local function saveDatabase()
-
-    local f = fs.open(DATABASE,"w")
-    f.write(textutils.serialize(cards))
-    f.close()
-
-end
-
-
-local function log(text)
-
-    local f = fs.open(LOGFILE,"a")
-
-    f.writeLine(
-        "["..
-        os.date("%Y-%m-%d %H:%M:%S")..
-        "] "..text
-    )
-
-    f.close()
-
-end
-
-
-
-local function createCard(msg)
-
-    local id
-
-    repeat
-        id = generateID()
-    until not cards[id]
-
-
-    cards[id] = {
-
-        security = {
-            clearance = msg.clearance,
-            version = 5
-        },
-
-        card = {
-            owner = msg.owner,
-            issued = os.date("%Y-%m-%d %H:%M:%S"),
-            issuer = "AEGIS"
-        },
-
-        status = "active"
-
+    ["Factory"] = {
+        id = 2,
+        clearance = 2,
+        output = "left"
     }
 
+}
 
-    saveDatabase()
+local function clear()
+
+    term.clear()
+    term.setCursorPos(1,1)
+
+end
+
+local function waitForCard()
+
+    print("Insert keycard...")
+
+    while not drive.isDiskPresent() do
+        sleep(1)
+    end
+
+end
+
+local function getClearance()
+
+    local mount = drive.getMountPath()
+
+    if not mount then
+        return nil
+    end
 
 
-    modem.transmit(
-        CHANNEL,
-        CHANNEL,
-        {
-            type="card_created",
-            request=msg.request,
-            id=id,
-            owner=msg.owner,
-            clearance=msg.clearance
-        }
-    )
+    local path =
+        fs.combine(
+            mount,
+            "security.dat"
+        )
 
 
-    log(
-        "CARD CREATED "..id..
-        " OWNER "..msg.owner
-    )
+    if not fs.exists(path) then
+        return nil
+    end
+
+
+    local file =
+        fs.open(path,"r")
+
+
+    local data =
+        textutils.unserialize(
+            file.readAll()
+        )
+
+
+    file.close()
+
+
+    if data then
+        return data.clearance
+    end
+
+
+    return nil
 
 end
 
 
 
-local function checkCard(msg)
+local function ejectCard()
 
-    local result = {
+    drive.ejectDisk()
 
-        type="card_result",
-        request=msg.request,
-        allowed=false
+    print()
+    print("Remove card.")
 
-    }
-
-
-    local card = cards[msg.id]
-
-
-    if not card then
-
-        result.reason="Unknown card"
-
-
-    elseif card.status ~= "active" then
-
-        result.reason="Card revoked"
-
-
-    elseif card.security.clearance < msg.required then
-
-        result.reason="Insufficient clearance"
-
-
-    else
-
-        result.allowed=true
-        result.owner=card.card.owner
-        result.clearance=card.security.clearance
-
+    while drive.isDiskPresent() do
+        sleep(1)
     end
-
-
-
-    if result.allowed then
-
-        log(
-            "ACCESS GRANTED "..msg.id..
-            " "..result.owner
-        )
-
-    else
-
-        log(
-            "ACCESS DENIED "..msg.id..
-            " "..result.reason
-        )
-
-    end
-
-
-    modem.transmit(
-        CHANNEL,
-        CHANNEL,
-        result
-    )
 
 end
 
 
 
-local function networkLoop()
+local function callElevator(destination)
+
+    local floor =
+        floors[destination]
+
+
+    print()
+    print(
+        "Calling elevator:"
+    )
+
+    print(destination)
+
+
+    redstone.setOutput(
+        floor.output,
+        true
+    )
+
+
+    sleep(1)
+
+
+    redstone.setOutput(
+        floor.output,
+        false
+    )
+
+
+end
+
+
+
+local function selectFloor(clearance)
+
 
     while true do
 
-        local _,_,channel,_,msg =
-            os.pullEvent("modem_message")
+        clear()
 
 
-        if channel == CHANNEL
-        and type(msg)=="table" then
+        print(" ELEVATOR CONTROL TERMINAL")
+        print()
 
 
-            if msg.type=="create_card" then
+        local options = {}
+        local count = 1
 
-                createCard(msg)
+
+        for name,data in pairs(floors) do
 
 
-            elseif msg.type=="check_card" then
+            -- Hide current floor
 
-                checkCard(msg)
+            if data.id ~= currentFloor then
+
+
+                if clearance >= data.clearance then
+
+
+                    options[count] = name
+
+
+                    print(
+                        count..
+                        ". "..
+                        name
+                    )
+
+
+                    count = count + 1
+
+
+                end
 
             end
 
         end
 
-    end
 
-end
+        if #options == 0 then
+
+            print(
+                "No available floors."
+            )
+
+            sleep(3)
+
+            return
+
+        end
 
 
-
-local function showCards()
-
-    term.clear()
-    term.setCursorPos(1,1)
-
-    print("AEGIS CARD DATABASE")
-    print()
-
-
-    for id,c in pairs(cards) do
-
-        print(id)
-
-        print(
-            c.card.owner..
-            " | Clearance: "..
-            c.security.clearance..
-            " | "..c.status
-        )
 
         print()
 
-    end
+        write(
+            "Select floor: "
+        )
 
 
-    print("Press ENTER")
-
-    read()
-
-end
-
-
-
-local function revokeCard()
-
-    term.clear()
-    term.setCursorPos(1,1)
-
-    print("ACTIVE CARDS")
-    print()
-
-
-    local list={}
-
-
-    for id,c in pairs(cards) do
-
-        if c.status=="active" then
-
-            table.insert(list,id)
-
-            print(
-                #list..
-                ") "..
-                c.card.owner
+        local input =
+            tonumber(
+                read()
             )
 
-            print(id)
-            print()
+
+        local selected =
+            options[input]
+
+
+        if selected then
+
+            callElevator(
+                selected
+            )
+
+            sleep(3)
+
+            return
+
+        else
+
+            print(
+                "Invalid selection."
+            )
+
+            sleep(2)
 
         end
 
     end
 
-
-    print("Select:")
-
-    local choice = tonumber(read())
-
-
-    local id = list[choice]
-
-
-    if id then
-
-        cards[id].status="revoked"
-        cards[id].security.clearance=0
-
-        saveDatabase()
-
-        print("Card revoked")
-
-    end
-
-
-    sleep(2)
-
 end
 
+while true do
+
+    clear()
 
 
-local function restoreCard()
-
-    term.clear()
-    term.setCursorPos(1,1)
+    print(" ELEVATOR CONTROL TERMINAL")
+    print()
 
 
-    write("Card ID: ")
-
-    local id = read()
+    waitForCard()
 
 
-    if cards[id] then
+    local clearance =
+        getClearance()
 
-        cards[id].status="active"
 
-        saveDatabase()
+    ejectCard()
 
-        print("Restored")
+
+
+    if clearance then
+
+
+        print(
+            "Clearance Level: "
+            ..
+            clearance
+        )
+
+
+        sleep(1)
+
+
+        selectFloor(
+            clearance
+        )
+
 
     else
 
-        print("Not found")
+
+        print(
+            "INVALID CARD"
+        )
+
+
+        sleep(3)
+
 
     end
 
-
-    sleep(2)
-
-end
-
-
-
-local function changeClearance()
-
-    term.clear()
-    term.setCursorPos(1,1)
-
-
-    write("Card ID: ")
-
-    local id = read()
-
-
-    if not cards[id] then
-
-        print("Not found")
-        sleep(2)
-        return
-
-    end
-
-
-    write("New clearance: ")
-
-    local level = tonumber(read())
-
-
-    if level and level >=0 and level<=5 then
-
-        cards[id].security.clearance=level
-
-        if level==0 then
-            cards[id].status="revoked"
-        end
-
-        saveDatabase()
-
-        print("Updated")
-
-    end
-
-
-    sleep(2)
-
-end
-
-
-
-local function adminLoop()
-
-    while true do
-
-        term.clear()
-        term.setCursorPos(1,1)
-
-        print("====================")
-        print(" AEGIS SECURITY")
-        print("====================")
-        print()
-        print("1. View cards")
-        print("2. Revoke card")
-        print("3. Restore card")
-        print("4. Change clearance")
-        print("5. Exit")
-        print()
-
-
-        local choice = read()
-
-
-        if choice=="1" then
-
-            showCards()
-
-
-        elseif choice=="2" then
-
-            revokeCard()
-
-
-        elseif choice=="3" then
-
-            restoreCard()
-
-
-        elseif choice=="4" then
-
-            changeClearance()
-
-
-        elseif choice=="5" then
-
-            error("Server stopped")
-
-        end
-
-    end
-
-end
-
-
-
-parallel.waitForAny(
-    networkLoop,
-    adminLoop
-)
 end
