@@ -1,0 +1,73 @@
+local CHANNEL=100
+local modem=peripheral.find("modem")
+
+if not modem then error("Wireless modem not found") end
+
+local function hash(str)
+    local h=5381
+    for i=1,#str do
+        h=((h*33)~string.byte(str,i))&0x7FFFFFFF
+    end
+    return tostring(h)
+end
+
+while true do
+    term.clear()
+    term.setCursorPos(1,1)
+
+    print("=== AEGIS REMOTE ===\n")
+
+    write("Password: ")
+    local password=read("*")
+
+    write("Return delay (seconds): ")
+    local returnDelay=tonumber(read()) or 30
+    if returnDelay<5 then returnDelay=5 end
+
+    modem.transmit(CHANNEL,CHANNEL,{
+        type="lift_request",
+        sender=os.getComputerID(),
+        password=hash(password),
+        returnDelay=returnDelay
+    })
+
+    print("\nWaiting for facility...")
+
+    local timer=os.startTimer(5)
+
+    while true do
+        local e,a,b,c,msg=os.pullEvent()
+
+        if e=="timer" and a==timer then
+            print("No response.")
+            sleep(2)
+            break
+        end
+
+        if e=="modem_message"
+        and b==CHANNEL
+        and type(msg)=="table"
+        and msg.type=="reply" then
+
+            if not msg.allowed then
+                print(msg.message)
+                sleep(3)
+                break
+            end
+
+            print("Access granted.\n")
+
+            for i=15,1,-1 do
+                term.setCursorPos(1,8)
+                term.clearLine()
+                print("Lift arriving in "..i.." seconds...")
+                sleep(1)
+            end
+
+            print("\nLift has arrived.")
+            print("It will return in "..returnDelay.." seconds.")
+            sleep(5)
+            break
+        end
+    end
+end
