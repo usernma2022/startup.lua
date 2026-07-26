@@ -1,0 +1,106 @@
+local MODEM_SIDE="left"
+local CHANNEL=25
+local REQUIRED_CLEARANCE=3
+local LIFT_OUTPUT="back"
+local RETURN_DELAY=15
+
+local drive=peripheral.find("drive")
+local modem=peripheral.wrap(MODEM_SIDE")
+
+if not drive then error("No floppy drive found") end
+if not modem then error("No modem found") end
+
+modem.open(CHANNEL)
+
+local function readFile(path)
+    if not fs.exists(path) then return end
+    local f=fs.open(path,"r")
+    local d=f.readAll()
+    f.close()
+    return d
+end
+
+local function eject()
+    if drive.isDiskPresent() then drive.ejectDisk() end
+end
+
+local function pulse()
+    redstone.setOutput(LIFT_OUTPUT,true)
+    sleep(0.5)
+    redstone.setOutput(LIFT_OUTPUT,false)
+end
+
+while true do
+    term.clear()
+    term.setCursorPos(1,1)
+    print("====================")
+    print("   AEGIS LIFT")
+    print("====================\n")
+    print("Insert keycard")
+
+    while not drive.isDiskPresent() do sleep(0.1) end
+
+    local mount=drive.getMountPath()
+    local cardID=readFile(fs.combine(mount,"auth.dat"))
+
+    if not cardID then
+        print("\nINVALID CARD")
+        eject()
+        sleep(2)
+        os.reboot()
+    end
+
+    local request=os.getComputerID()
+
+    modem.transmit(CHANNEL,CHANNEL,{
+        type="check_card",
+        request=request,
+        id=cardID,
+        required=REQUIRED_CLEARANCE
+    })
+
+    local result
+
+    while true do
+        local _,_,channel,_,msg=os.pullEvent("modem_message")
+        if channel==CHANNEL and type(msg)=="table"
+        and msg.type=="card_result"
+        and msg.request==request then
+            result=msg
+            break
+        end
+    end
+
+    term.clear()
+    term.setCursorPos(1,1)
+
+    if result.allowed then
+        print("ACCESS GRANTED\n")
+        print(result.owner)
+        print("Clearance "..result.clearance.."\n")
+
+        write("Call lift in (seconds): ")
+        local waitTime=tonumber(read()) or 30
+        if waitTime<0 then waitTime=0 end
+
+        print("\nLift arriving in "..waitTime.."s...")
+        eject()
+        sleep(waitTime)
+
+        print("Calling lift...")
+        pulse()
+
+        print("Lift will return in "..RETURN_DELAY.."s...")
+        sleep(RETURN_DELAY)
+
+        print("Returning lift...")
+        pulse()
+    else
+        print("ACCESS DENIED\n")
+        print(result.reason)
+        eject()
+    end
+
+    sleep(1)
+    os.reboot()
+end
