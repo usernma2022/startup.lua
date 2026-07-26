@@ -100,25 +100,25 @@ local function remoteListener()
 
             else
 
-                sendReply(
-                    sender,
-                    true,
-                    "Access granted. Lift arriving in 15 seconds."
-                )
+            sendReply(
+                sender,
+                true,
+                "Access granted. Lift arriving in 15 seconds."
+            )
 
-                sleep(15)
+            pulseLift()
 
-                pulseLift()
+            local delay=tonumber(msg.returnDelay)
 
-                local delay=tonumber(msg.returnDelay)
+            if not delay then
+                delay=30
+            end
 
-                if not delay then
-                    delay=30
-                end
+            sleep(15)
 
-                sleep(delay)
+            sleep(delay)
 
-                pulseLift()
+            pulseLift()
             end
         end
     end
