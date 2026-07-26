@@ -1,28 +1,59 @@
-local CHANNEL=100
+local CHANNEL_FILE="channel.cfg"
+
 local modem=peripheral.find("modem")
 
-if not modem then error("Wireless modem not found") end
+if not modem then
+    error("Wireless modem not found")
+end
 
 local function hash(str)
     local h=5381
+
     for i=1,#str do
-        h=((h*33)~string.byte(str,i))&0x7FFFFFFF
+        h=(h*33+string.byte(str,i))%2147483647
     end
+
     return tostring(h)
 end
 
+local function loadChannel()
+    if not fs.exists(CHANNEL_FILE) then
+        local f=fs.open(CHANNEL_FILE,"w")
+        f.write("100")
+        f.close()
+        return 100
+    end
+
+    local f=fs.open(CHANNEL_FILE,"r")
+    local c=tonumber(f.readAll())
+    f.close()
+
+    return c or 100
+end
+
+local CHANNEL=loadChannel()
+
+modem.open(CHANNEL)
+
 while true do
+
     term.clear()
     term.setCursorPos(1,1)
 
-    print("=== AEGIS REMOTE ===\n")
+    print("====================")
+    print("   AEGIS REMOTE")
+    print("====================")
+    print()
 
     write("Password: ")
     local password=read("*")
 
     write("Return delay (seconds): ")
-    local returnDelay=tonumber(read()) or 30
-    if returnDelay<5 then returnDelay=5 end
+    local returnDelay=tonumber(read())
+
+    if not returnDelay or returnDelay<5 then
+        returnDelay=30
+    end
 
     modem.transmit(CHANNEL,CHANNEL,{
         type="lift_request",
@@ -31,17 +62,23 @@ while true do
         returnDelay=returnDelay
     })
 
-    print("\nWaiting for facility...")
+    print()
+    print("Request sent.")
+    print("Waiting for facility...")
 
-    local timer=os.startTimer(5)
+    local timer=os.startTimer(10)
 
     while true do
+
         local e,a,b,c,msg=os.pullEvent()
 
         if e=="timer" and a==timer then
+
+            print()
             print("No response.")
-            sleep(2)
+            sleep(3)
             break
+
         end
 
         if e=="modem_message"
@@ -50,23 +87,37 @@ while true do
         and msg.type=="reply" then
 
             if not msg.allowed then
+
+                print()
                 print(msg.message)
                 sleep(3)
                 break
+
             end
 
-            print("Access granted.\n")
+            print()
+            print("Access granted.")
 
             for i=15,1,-1 do
-                term.setCursorPos(1,8)
+
+                term.setCursorPos(1,10)
                 term.clearLine()
-                print("Lift arriving in "..i.." seconds...")
+
+                print(
+                    "Lift arriving in "..i.." seconds..."
+                )
+
                 sleep(1)
             end
 
-            print("\nLift has arrived.")
-            print("It will return in "..returnDelay.." seconds.")
+            print()
+            print("Lift has arrived.")
+            print(
+                "Returning in "..returnDelay.." seconds."
+            )
+
             sleep(5)
+
             break
         end
     end
