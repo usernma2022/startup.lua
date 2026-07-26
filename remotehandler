@@ -1,0 +1,225 @@
+-- AEGIS Lift Control Terminal v1.0
+
+local MODEM_SIDE="left"
+local OUTPUT_SIDE="back"
+
+local CHANNEL_FILE="channel.cfg"
+local PASSWORD_FILE="password.cfg"
+local REMOTE_FILE="remote.cfg"
+
+local modem=peripheral.wrap(MODEM_SIDE)
+
+if not modem then
+    error("No modem found")
+end
+
+local function hash(str)
+    local h=5381
+    for i=1,#str do
+        h=((h*33)~string.byte(str,i))&0x7FFFFFFF
+    end
+    return tostring(h)
+end
+
+local function load(path,default)
+    if not fs.exists(path) then
+        local f=fs.open(path,"w")
+        f.write(default)
+        f.close()
+        return default
+    end
+
+    local f=fs.open(path,"r")
+    local data=f.readAll()
+    f.close()
+    return data
+end
+
+local function save(path,data)
+    local f=fs.open(path,"w")
+    f.write(data)
+    f.close()
+end
+
+local channel=tonumber(load(CHANNEL_FILE,"100"))
+local password=load(PASSWORD_FILE,hash("CHANGE_ME"))
+local remoteEnabled=load(REMOTE_FILE,"true")=="true"
+
+modem.open(channel)
+
+local function pulseLift()
+    redstone.setOutput(OUTPUT_SIDE,true)
+    sleep(1)
+    redstone.setOutput(OUTPUT_SIDE,false)
+end
+
+local function callLift(returnTime)
+    pulseLift()
+
+    if returnTime then
+        sleep(returnTime)
+        pulseLift()
+    end
+end
+
+local function sendReply(id,msg)
+    modem.transmit(channel,channel,{
+        type="reply",
+        allowed=msg.allowed,
+        message=msg.message
+    })
+end
+
+local function remoteListener()
+    while true do
+        local _,_,ch,_,msg=os.pullEvent("modem_message")
+
+        if ch==channel
+        and type(msg)=="table"
+        and msg.type=="lift_request" then
+
+            if not remoteEnabled then
+
+                sendReply(msg.sender,{
+                    allowed=false,
+                    message="Remote access disabled."
+                })
+
+            elseif msg.password~=password then
+
+                sendReply(msg.sender,{
+                    allowed=false,
+                    message="Invalid password."
+                })
+
+            else
+
+                sendReply(msg.sender,{
+                    allowed=true,
+                    message="Access granted."
+                })
+
+                for i=15,1,-1 do
+                    sleep(1)
+                end
+
+                pulseLift()
+
+                local delay=tonumber(msg.returnDelay) or 30
+
+                sleep(delay)
+
+                pulseLift()
+            end
+        end
+    end
+end
+
+
+local function menu()
+    while true do
+
+        term.clear()
+        term.setCursorPos(1,1)
+
+        print("====================")
+        print(" AEGIS LIFT CONTROL")
+        print("====================")
+        print()
+        print("1. Call Lift")
+        print("2. Change Password")
+        print("3. Change Channel")
+        print("4. Toggle Remote Access")
+        print("5. Status")
+        print("6. Exit")
+        print()
+
+        write("> ")
+        local choice=read()
+
+        if choice=="1" then
+
+            print()
+            print("Calling lift...")
+            pulseLift()
+            sleep(2)
+
+        elseif choice=="2" then
+
+            term.clear()
+            term.setCursorPos(1,1)
+
+            write("New password: ")
+            local new=read("*")
+
+            password=hash(new)
+            save(PASSWORD_FILE,password)
+
+            print()
+            print("Password changed.")
+            sleep(2)
+
+        elseif choice=="3" then
+
+            term.clear()
+            term.setCursorPos(1,1)
+
+            write("New channel: ")
+            local new=tonumber(read())
+
+            if new then
+                modem.close(channel)
+
+                channel=new
+                save(CHANNEL_FILE,tostring(channel))
+
+                modem.open(channel)
+
+                print("Channel changed.")
+            else
+                print("Invalid channel.")
+            end
+
+            sleep(2)
+
+        elseif choice=="4" then
+
+            remoteEnabled=not remoteEnabled
+            save(REMOTE_FILE,tostring(remoteEnabled))
+
+            print()
+
+            if remoteEnabled then
+                print("Remote access ENABLED")
+            else
+                print("Remote access LOCKED")
+            end
+
+            sleep(2)
+
+        elseif choice=="5" then
+
+            print()
+            print("Channel: "..channel)
+
+            if remoteEnabled then
+                print("Remote: ENABLED")
+            else
+                print("Remote: LOCKED")
+            end
+
+            print()
+            print("Press enter.")
+            read()
+
+        elseif choice=="6" then
+            return
+        end
+    end
+end
+
+
+parallel.waitForAny(
+    remoteListener,
+    menu
+)
