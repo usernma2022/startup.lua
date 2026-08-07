@@ -1,43 +1,51 @@
+-- AEGIS Target Computer V1
+
 local detector = peripheral.find("playerDetector")
 
 if not detector then
     error("Player Detector not found")
 end
 
+local MY_USERNAME = "YourUsername"
 local RANGE = 192
 
 local target = nil
-local showControls = false
 local targets = {}
+local showControls = false
 
 local w, h = term.getSize()
-
-local function clamp(v, min, max)
-    if v < min then return min end
-    if v > max then return max end
-    return v
-end
 
 local function distance(a, b)
     local dx = a.x - b.x
     local dy = a.y - b.y
     local dz = a.z - b.z
-    return math.sqrt(dx*dx + dy*dy + dz*dz)
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+
+local function normalizeAngle(angle)
+    while angle > 180 do
+        angle = angle - 360
+    end
+    while angle < -180 do
+        angle = angle + 360
+    end
+    return angle
 end
 
 local function getSelf()
-    local name = detector.getPlayerName()
-    return detector.getPlayerPos(name)
+    return detector.getPlayerPos(MY_USERNAME)
 end
 
 local function refreshTargets()
     local self = getSelf()
-    if not self then return end
+    if not self then
+        return
+    end
 
     local newTargets = {}
 
     for _, player in ipairs(detector.getOnlinePlayers()) do
-        if player ~= detector.getPlayerName() then
+        if player ~= MY_USERNAME then
             local data = detector.getPlayerPos(player)
 
             if data then
@@ -54,7 +62,7 @@ local function refreshTargets()
         end
     end
 
-    table.sort(newTargets, function(a,b)
+    table.sort(newTargets, function(a, b)
         return a.distance < b.distance
     end)
 
@@ -68,12 +76,14 @@ local function selectClosest()
 end
 
 local function cycleTarget(direction)
-    if #targets == 0 then return end
+    if #targets == 0 then
+        return
+    end
 
     local index = 1
 
-    for i,v in ipairs(targets) do
-        if v.name == target then
+    for i, player in ipairs(targets) do
+        if player.name == target then
             index = i
             break
         end
@@ -90,19 +100,7 @@ local function cycleTarget(direction)
     target = targets[index].name
 end
 
-local function normalizeAngle(angle)
-    while angle > 180 do
-        angle = angle - 360
-    end
-
-    while angle < -180 do
-        angle = angle + 360
-    end
-
-    return angle
-end
-
-local function getDirectionArrow(player, enemy)
+local function getArrow(player, enemy)
 
     local dx = enemy.x - player.x
     local dz = enemy.z - player.z
@@ -133,47 +131,40 @@ end
 local function draw()
 
     term.clear()
-    term.setCursorPos(1,1)
+    term.setCursorPos(1, 1)
 
     local self = getSelf()
 
     if not self then
-        print("NO PLAYER DATA")
+        print("SELF NOT FOUND")
         return
     end
 
-    local targetData
+    local targetData = nil
 
     if target then
         targetData = detector.getPlayerPos(target)
     end
 
-    term.setTextColor(colors.white)
-
     if targetData then
 
-        local dist = math.floor(distance(self,targetData))
+        local dist = math.floor(distance(self, targetData))
+        local height = math.floor(targetData.y - self.y)
 
-        local height = targetData.y - self.y
-
-        local heightText
-
-        if height > 0 then
-            heightText = "▲"..math.floor(height)
-        elseif height < 0 then
-            heightText = "▼"..math.abs(math.floor(height))
-        else
-            heightText = "-"
-        end
-
-        term.setTextColor(colors.white)
         write(target)
-
+        
         term.setTextColor(colors.cyan)
         write(" "..dist.."m")
 
         term.setTextColor(colors.yellow)
-        write(" "..heightText)
+
+        if height > 0 then
+            write(" ▲"..height)
+        elseif height < 0 then
+            write(" ▼"..math.abs(height))
+        else
+            write(" --")
+        end
 
         term.setTextColor(colors.green)
         write(" LOCK")
@@ -184,10 +175,7 @@ local function draw()
         write(target)
 
         term.setTextColor(colors.red)
-        write(" LOST")
-
-        term.setTextColor(colors.red)
-        write(" LOST")
+        write(" LOST | LOST")
 
     else
 
@@ -197,55 +185,47 @@ local function draw()
     end
 
     term.setTextColor(colors.gray)
-    write(" H")
+    write(" | H Controls")
+
 
     if showControls then
 
-        term.setCursorPos(1,3)
+        term.setCursorPos(w - 12, 3)
 
         term.setTextColor(colors.white)
 
-        print("+---------+")
-        print("| Z Prev  |")
-        print("| X Next  |")
-        print("| H Hide  |")
-        print("+---------+")
+        print("+----------+")
+        print("| Z Prev   |")
+        print("| X Next   |")
+        print("| H Hide   |")
+        print("+----------+")
 
     end
 
 
     if targetData then
 
-        local arrow = getDirectionArrow(self,targetData)
+        local arrow = getArrow(self, targetData)
 
         term.setCursorPos(
-            math.floor(w/2),
-            math.floor(h/2)
+            math.floor(w / 2),
+            math.floor(h / 2)
         )
 
         term.setTextColor(colors.red)
         write(arrow)
 
     end
+
+    term.setTextColor(colors.white)
 end
 
 
-local function main()
-
-    refreshTargets()
-
-    if not target then
-        selectClosest()
-    end
-
-    draw()
-
-end
-
+refreshTargets()
+selectClosest()
+draw()
 
 while true do
-
-    refreshTargets()
 
     local event, key = os.pullEvent("key")
 
@@ -259,6 +239,7 @@ while true do
         showControls = not showControls
     end
 
+    refreshTargets()
     draw()
 
 end
