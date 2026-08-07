@@ -1,0 +1,264 @@
+local detector = peripheral.find("playerDetector")
+
+if not detector then
+    error("Player Detector not found")
+end
+
+local RANGE = 192
+
+local target = nil
+local showControls = false
+local targets = {}
+
+local w, h = term.getSize()
+
+local function clamp(v, min, max)
+    if v < min then return min end
+    if v > max then return max end
+    return v
+end
+
+local function distance(a, b)
+    local dx = a.x - b.x
+    local dy = a.y - b.y
+    local dz = a.z - b.z
+    return math.sqrt(dx*dx + dy*dy + dz*dz)
+end
+
+local function getSelf()
+    local name = detector.getPlayerName()
+    return detector.getPlayerPos(name)
+end
+
+local function refreshTargets()
+    local self = getSelf()
+    if not self then return end
+
+    local newTargets = {}
+
+    for _, player in ipairs(detector.getOnlinePlayers()) do
+        if player ~= detector.getPlayerName() then
+            local data = detector.getPlayerPos(player)
+
+            if data then
+                local dist = distance(self, data)
+
+                if dist <= RANGE then
+                    table.insert(newTargets, {
+                        name = player,
+                        data = data,
+                        distance = dist
+                    })
+                end
+            end
+        end
+    end
+
+    table.sort(newTargets, function(a,b)
+        return a.distance < b.distance
+    end)
+
+    targets = newTargets
+end
+
+local function selectClosest()
+    if targets[1] then
+        target = targets[1].name
+    end
+end
+
+local function cycleTarget(direction)
+    if #targets == 0 then return end
+
+    local index = 1
+
+    for i,v in ipairs(targets) do
+        if v.name == target then
+            index = i
+            break
+        end
+    end
+
+    index = index + direction
+
+    if index > #targets then
+        index = 1
+    elseif index < 1 then
+        index = #targets
+    end
+
+    target = targets[index].name
+end
+
+local function normalizeAngle(angle)
+    while angle > 180 do
+        angle = angle - 360
+    end
+
+    while angle < -180 do
+        angle = angle + 360
+    end
+
+    return angle
+end
+
+local function getDirectionArrow(player, enemy)
+
+    local dx = enemy.x - player.x
+    local dz = enemy.z - player.z
+
+    local targetYaw = math.deg(math.atan2(-dx, dz))
+
+    local difference = normalizeAngle(targetYaw - player.yaw)
+
+    if difference >= -22.5 and difference <= 22.5 then
+        return "▲"
+    elseif difference > 22.5 and difference < 67.5 then
+        return "◢"
+    elseif difference >= 67.5 and difference <= 112.5 then
+        return "►"
+    elseif difference > 112.5 and difference < 157.5 then
+        return "◥"
+    elseif difference >= 157.5 or difference <= -157.5 then
+        return "▼"
+    elseif difference < -112.5 and difference > -157.5 then
+        return "◤"
+    elseif difference <= -67.5 and difference >= -112.5 then
+        return "◄"
+    else
+        return "◣"
+    end
+end
+
+local function draw()
+
+    term.clear()
+    term.setCursorPos(1,1)
+
+    local self = getSelf()
+
+    if not self then
+        print("NO PLAYER DATA")
+        return
+    end
+
+    local targetData
+
+    if target then
+        targetData = detector.getPlayerPos(target)
+    end
+
+    term.setTextColor(colors.white)
+
+    if targetData then
+
+        local dist = math.floor(distance(self,targetData))
+
+        local height = targetData.y - self.y
+
+        local heightText
+
+        if height > 0 then
+            heightText = "▲"..math.floor(height)
+        elseif height < 0 then
+            heightText = "▼"..math.abs(math.floor(height))
+        else
+            heightText = "-"
+        end
+
+        term.setTextColor(colors.white)
+        write(target)
+
+        term.setTextColor(colors.cyan)
+        write(" "..dist.."m")
+
+        term.setTextColor(colors.yellow)
+        write(" "..heightText)
+
+        term.setTextColor(colors.green)
+        write(" LOCK")
+
+    elseif target then
+
+        term.setTextColor(colors.white)
+        write(target)
+
+        term.setTextColor(colors.red)
+        write(" LOST")
+
+        term.setTextColor(colors.red)
+        write(" LOST")
+
+    else
+
+        term.setTextColor(colors.red)
+        write("NO TARGET")
+
+    end
+
+    term.setTextColor(colors.gray)
+    write(" H")
+
+    if showControls then
+
+        term.setCursorPos(1,3)
+
+        term.setTextColor(colors.white)
+
+        print("+---------+")
+        print("| Z Prev  |")
+        print("| X Next  |")
+        print("| H Hide  |")
+        print("+---------+")
+
+    end
+
+
+    if targetData then
+
+        local arrow = getDirectionArrow(self,targetData)
+
+        term.setCursorPos(
+            math.floor(w/2),
+            math.floor(h/2)
+        )
+
+        term.setTextColor(colors.red)
+        write(arrow)
+
+    end
+end
+
+
+local function main()
+
+    refreshTargets()
+
+    if not target then
+        selectClosest()
+    end
+
+    draw()
+
+end
+
+
+while true do
+
+    refreshTargets()
+
+    local event, key = os.pullEvent("key")
+
+    if key == keys.x then
+        cycleTarget(1)
+
+    elseif key == keys.z then
+        cycleTarget(-1)
+
+    elseif key == keys.h then
+        showControls = not showControls
+    end
+
+    draw()
+
+end
