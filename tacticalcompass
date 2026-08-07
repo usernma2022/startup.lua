@@ -1,10 +1,12 @@
+-- AEGIS Target Computer V1.3
+
 local detector = peripheral.find("playerDetector")
 
 if not detector then
     error("Player Detector not found")
 end
 
-local MY_USERNAME = "Usernam_"
+local MY_USERNAME = "YourUsername"
 local RANGE = 192
 local UPDATE_TIME = 0.25
 
@@ -12,7 +14,7 @@ local target = nil
 local targets = {}
 local showControls = false
 
-local w,h = term.getSize()
+local w, h = term.getSize()
 
 local function validPosition(data)
     return data and data.x and data.y and data.z
@@ -27,16 +29,17 @@ local function distance(a,b)
     local dy = a.y-b.y
     local dz = a.z-b.z
 
-    return math.sqrt(dx*dx+dy*dy+dz*dz)
+    return math.sqrt(dx*dx + dy*dy + dz*dz)
 end
 
 local function normalizeAngle(angle)
+
     while angle > 180 do
-        angle = angle-360
+        angle = angle - 360
     end
 
     while angle < -180 do
-        angle = angle+360
+        angle = angle + 360
     end
 
     return angle
@@ -111,94 +114,115 @@ local function cycleTarget(direction)
 
     for i,v in ipairs(targets) do
         if v.name == target then
-            index=i
+            index = i
             break
         end
     end
 
-    index=index+direction
+    index = index + direction
 
-    if index>#targets then
-        index=1
-    elseif index<1 then
-        index=#targets
+    if index > #targets then
+        index = 1
+    elseif index < 1 then
+        index = #targets
     end
 
-    target=targets[index].name
+    target = targets[index].name
+
 end
 
-local function getDirection(player,targetData)
+
+local function getTargetAngle(player,targetData)
 
     local dx = targetData.x-player.x
     local dz = targetData.z-player.z
 
-    local angle = math.deg(math.atan2(-dx,dz))
-    local diff = normalizeAngle(angle-player.yaw)
+    local targetYaw = math.deg(math.atan2(-dx,dz))
 
-    if diff > -45 and diff < 45 then
-        return " | "
-    elseif diff >=45 and diff <135 then
-        return " -"
-    elseif diff <=-45 and diff >-135 then
-        return "- "
-    else
-        return " || "
-    end
+    return normalizeAngle(player.yaw-targetYaw)
+
 end
 
-local function drawCompass(self,targetData)
 
-    if not validPosition(targetData) then
-        return
-    end
+local function drawPoint(x,y,char)
 
-    local midX = math.floor(w/2)
-    local midY = math.floor(h/2)
+    if x >= 1 and x <= w and y >= 1 and y <= h then
 
-    term.setCursorPos(midX,midY)
-    term.setTextColor(colors.red)
+        term.setCursorPos(x,y)
+        write(char)
 
-    write("O")
-
-    local dir = getDirection(self,targetData)
-
-    if dir==" | " then
-        term.setCursorPos(midX,midY-1)
-        write("|")
-        term.setCursorPos(midX,midY-2)
-        write("|")
-
-    elseif dir==" - " then
-        term.setCursorPos(midX+1,midY)
-        write("-")
-        term.setCursorPos(midX+2,midY)
-        write("-")
-
-    elseif dir=="- " then
-        term.setCursorPos(midX-1,midY)
-        write("-")
-        term.setCursorPos(midX-2,midY)
-        write("-")
-
-    else
-        term.setCursorPos(midX,midY-1)
-        write("|")
     end
 
 end
+
+
+local function drawLine(angle)
+
+    local cx = math.floor(w/2)
+    local cy = math.floor(h/2)
+
+    local length = math.min(w,h)/2-2
+
+    local rad = math.rad(angle)
+
+    local x = math.sin(rad)
+    local y = -math.cos(rad)
+
+    local lastX,lastY
+
+    for i=1,length do
+
+        local px = math.floor(cx + x*i)
+        local py = math.floor(cy + y*i)
+
+        if px ~= lastX or py ~= lastY then
+
+            local char
+
+            if math.abs(x) > math.abs(y)*2 then
+                char = "-"
+
+            elseif math.abs(y) > math.abs(x)*2 then
+                char = "|"
+
+            elseif x*y > 0 then
+                char = "\\"
+
+            else
+                char = "/"
+
+            end
+
+            drawPoint(px,py,char)
+
+            lastX=px
+            lastY=py
+
+        end
+
+    end
+
+    drawPoint(cx,cy,"O")
+
+end
+
 
 local function draw()
 
     term.clear()
-    term.setCursorPos(1,1)
 
     local self=getSelf()
 
+    term.setCursorPos(1,1)
+
     if not self then
+
         term.setTextColor(colors.red)
-        print("SELF NOT FOUND")
+        write("SELF NOT FOUND")
         return
+
     end
+
 
     local targetData=nil
 
@@ -207,48 +231,56 @@ local function draw()
     end
 
 
+    term.setTextColor(colors.white)
+
+
     if validPosition(targetData) then
 
         local dist=math.floor(distance(self,targetData))
         local height=math.floor(targetData.y-self.y)
 
-        term.setTextColor(colors.white)
         write(target)
+        write(" | ")
 
         term.setTextColor(colors.cyan)
-        write(" "..dist.."m")
+        write(dist.."m")
+
+        write(" | ")
 
         term.setTextColor(colors.yellow)
 
-        if height>=0 then
-            write(" +"..height)
+        if height >= 0 then
+            write("+"..height)
+
         else
-            write(" "..height)
+            write(height)
+
         end
 
-        term.setTextColor(colors.green)
-        write(" LOCK")
+        write(" | ")
 
     elseif target then
 
         term.setTextColor(colors.red)
-        write(target.." LOST")
+        write(target.." | LOST | LOST | ")
 
     else
 
         term.setTextColor(colors.red)
-        write("NO TARGET")
+        write("NO TARGET | ")
 
     end
 
 
     term.setTextColor(colors.gray)
-    write(" | H Controls")
+    write("H Controls")
 
 
     if showControls then
 
         term.setCursorPos(1,3)
+
+        term.setTextColor(colors.white)
 
         print("+----------+")
         print("| Z Prev   |")
@@ -259,38 +291,53 @@ local function draw()
     end
 
 
-    drawCompass(self,targetData)
+    if validPosition(targetData) then
+
+        term.setTextColor(colors.red)
+
+        local angle=getTargetAngle(self,targetData)
+
+        drawLine(angle)
+
+    end
+
 
 end
 
 
-local function updater()
+local function updateLoop()
 
     while true do
+
         refreshTargets()
         selectClosest()
         draw()
 
         sleep(UPDATE_TIME)
+
     end
 
 end
 
 
-local function controls()
+local function controlLoop()
 
     while true do
 
         local event,key=os.pullEvent("key")
 
         if key==keys.x then
+
             cycleTarget(1)
 
         elseif key==keys.z then
+
             cycleTarget(-1)
 
         elseif key==keys.h then
-            showControls=not showControls
+
+            showControls = not showControls
+
         end
 
     end
@@ -299,6 +346,6 @@ end
 
 
 parallel.waitForAny(
-    updater,
-    controls
+    updateLoop,
+    controlLoop
 )
