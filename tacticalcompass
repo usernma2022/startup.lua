@@ -1,5 +1,3 @@
--- AEGIS Target Computer V1.3
-
 local detector = peripheral.find("playerDetector")
 
 if not detector then
@@ -10,146 +8,180 @@ local MY_USERNAME = "YourUsername"
 local RANGE = 192
 local UPDATE_TIME = 0.25
 
+-- 1 = invert left/right
+-- 0 = normal
+local INVERT_DIRECTION = 1
+
 local target = nil
 local targets = {}
 local showControls = false
 
-local w, h = term.getSize()
+local w,h = term.getSize()
+
+local buffer = window.create(term.current(),1,1,w,h)
 
 local function validPosition(data)
     return data and data.x and data.y and data.z
 end
 
 local function distance(a,b)
+
     if not validPosition(a) or not validPosition(b) then
         return math.huge
     end
 
-    local dx = a.x-b.x
-    local dy = a.y-b.y
-    local dz = a.z-b.z
+    local dx=a.x-b.x
+    local dy=a.y-b.y
+    local dz=a.z-b.z
 
-    return math.sqrt(dx*dx + dy*dy + dz*dz)
+    return math.sqrt(dx*dx+dy*dy+dz*dz)
+
 end
+
 
 local function normalizeAngle(angle)
 
     while angle > 180 do
-        angle = angle - 360
+        angle=angle-360
     end
 
     while angle < -180 do
-        angle = angle + 360
+        angle=angle+360
     end
 
     return angle
+
 end
 
+
 local function getSelf()
-    local data = detector.getPlayerPos(MY_USERNAME)
+
+    local data=detector.getPlayerPos(MY_USERNAME)
 
     if validPosition(data) then
         return data
     end
 
     return nil
+
 end
+
 
 local function refreshTargets()
 
-    local self = getSelf()
+    local self=getSelf()
 
     if not self then
-        targets = {}
         return
     end
 
-    local newTargets = {}
+    local newTargets={}
 
     for _,player in ipairs(detector.getOnlinePlayers()) do
 
         if player ~= MY_USERNAME then
 
-            local data = detector.getPlayerPos(player)
+            local data=detector.getPlayerPos(player)
+
+            local dist=math.huge
 
             if validPosition(data) then
-
-                local dist = distance(self,data)
-
-                if dist <= RANGE then
-
-                    table.insert(newTargets,{
-                        name = player,
-                        data = data,
-                        distance = dist
-                    })
-
-                end
+                dist=distance(self,data)
             end
+
+            table.insert(newTargets,{
+                name=player,
+                data=data,
+                distance=dist
+            })
+
         end
     end
 
+
     table.sort(newTargets,function(a,b)
-        return a.distance < b.distance
+
+        return a.distance<b.distance
+
     end)
 
-    targets = newTargets
+
+    targets=newTargets
+
 end
+
 
 local function selectClosest()
 
     if not target and targets[1] then
-        target = targets[1].name
+        target=targets[1].name
     end
 
 end
 
+
 local function cycleTarget(direction)
 
-    if #targets == 0 then
+    if #targets==0 then
         return
     end
 
-    local index = 1
+
+    local index=1
+
 
     for i,v in ipairs(targets) do
-        if v.name == target then
-            index = i
+
+        if v.name==target then
+            index=i
             break
         end
+
     end
 
-    index = index + direction
 
-    if index > #targets then
-        index = 1
-    elseif index < 1 then
-        index = #targets
+    index=index+direction
+
+
+    if index>#targets then
+        index=1
+
+    elseif index<1 then
+        index=#targets
     end
 
-    target = targets[index].name
+
+    target=targets[index].name
 
 end
 
 
 local function getTargetAngle(player,targetData)
 
-    local dx = targetData.x-player.x
-    local dz = targetData.z-player.z
+    local dx=targetData.x-player.x
+    local dz=targetData.z-player.z
 
-    local targetYaw = math.deg(math.atan2(-dx,dz))
+    local targetYaw=math.deg(math.atan2(-dx,dz))
 
-    return normalizeAngle(player.yaw-targetYaw)
+    local angle=normalizeAngle(player.yaw-targetYaw)
+
+
+    if INVERT_DIRECTION==1 then
+        angle=-angle
+    end
+
+
+    return angle
 
 end
 
 
 local function drawPoint(x,y,char)
 
-    if x >= 1 and x <= w and y >= 1 and y <= h then
+    if x>=1 and x<=w and y>=1 and y<=h then
 
-        term.setCursorPos(x,y)
-        write(char)
+        buffer.setCursorPos(x,y)
+        buffer.write(char)
 
     end
 
@@ -158,40 +190,44 @@ end
 
 local function drawLine(angle)
 
-    local cx = math.floor(w/2)
-    local cy = math.floor(h/2)
+    local cx=math.floor(w/2)
+    local cy=math.floor(h/2)
 
-    local length = math.min(w,h)/2-2
+    local length=math.min(w,h)/2-2
 
-    local rad = math.rad(angle)
+    local rad=math.rad(angle)
 
-    local x = math.sin(rad)
-    local y = -math.cos(rad)
+    local x=math.sin(rad)
+    local y=-math.cos(rad)
 
     local lastX,lastY
 
+
     for i=1,length do
 
-        local px = math.floor(cx + x*i)
-        local py = math.floor(cy + y*i)
+        local px=math.floor(cx+x*i)
+        local py=math.floor(cy+y*i)
 
-        if px ~= lastX or py ~= lastY then
+
+        if px~=lastX or py~=lastY then
 
             local char
 
-            if math.abs(x) > math.abs(y)*2 then
-                char = "-"
 
-            elseif math.abs(y) > math.abs(x)*2 then
-                char = "|"
+            if math.abs(x)>math.abs(y)*2 then
+                char="-"
 
-            elseif x*y > 0 then
-                char = "\\"
+            elseif math.abs(y)>math.abs(x)*2 then
+                char="|"
+
+            elseif x*y>0 then
+                char="\\"
 
             else
-                char = "/"
+                char="/"
 
             end
+
 
             drawPoint(px,py,char)
 
@@ -202,6 +238,7 @@ local function drawLine(angle)
 
     end
 
+
     drawPoint(cx,cy,"O")
 
 end
@@ -209,16 +246,17 @@ end
 
 local function draw()
 
-    term.clear()
+    buffer.clear()
+    buffer.setCursorPos(1,1)
+
 
     local self=getSelf()
 
-    term.setCursorPos(1,1)
 
     if not self then
 
-        term.setTextColor(colors.red)
-        write("SELF NOT FOUND")
+        buffer.setTextColor(colors.red)
+        buffer.write("SELF NOT FOUND")
         return
 
     end
@@ -226,12 +264,11 @@ local function draw()
 
     local targetData=nil
 
+
     if target then
         targetData=detector.getPlayerPos(target)
     end
 
-
-    term.setTextColor(colors.white)
 
 
     if validPosition(targetData) then
@@ -239,68 +276,81 @@ local function draw()
         local dist=math.floor(distance(self,targetData))
         local height=math.floor(targetData.y-self.y)
 
-        write(target)
-        write(" | ")
 
-        term.setTextColor(colors.cyan)
-        write(dist.."m")
+        buffer.setTextColor(colors.white)
+        buffer.write(target.." | ")
 
-        write(" | ")
 
-        term.setTextColor(colors.yellow)
+        buffer.setTextColor(colors.cyan)
+        buffer.write(dist.."m | ")
 
-        if height >= 0 then
-            write("+"..height)
 
+        buffer.setTextColor(colors.yellow)
+
+
+        if height>=0 then
+            buffer.write("+"..height)
         else
-            write(height)
-
+            buffer.write(height)
         end
 
-        write(" | ")
+
+        buffer.write(" | ")
+
 
     elseif target then
 
-        term.setTextColor(colors.red)
-        write(target.." | LOST | LOST | ")
+        buffer.setTextColor(colors.red)
+        buffer.write(target.." | LOST | LOST | ")
 
     else
 
-        term.setTextColor(colors.red)
-        write("NO TARGET | ")
+        buffer.setTextColor(colors.red)
+        buffer.write("NO TARGET | ")
 
     end
 
 
-    term.setTextColor(colors.gray)
-    write("H Controls")
+    buffer.setTextColor(colors.gray)
+    buffer.write("H Controls")
+
 
 
     if showControls then
 
-        term.setCursorPos(1,3)
+        buffer.setCursorPos(1,3)
 
-        term.setTextColor(colors.white)
+        buffer.setTextColor(colors.white)
 
-        print("+----------+")
-        print("| Z Prev   |")
-        print("| X Next   |")
-        print("| H Hide   |")
-        print("+----------+")
+        buffer.write("+----------+")
+        buffer.setCursorPos(1,4)
+        buffer.write("| Z Prev   |")
+        buffer.setCursorPos(1,5)
+        buffer.write("| X Next   |")
+        buffer.setCursorPos(1,6)
+        buffer.write("| H Hide   |")
+        buffer.setCursorPos(1,7)
+        buffer.write("+----------+")
 
     end
+
 
 
     if validPosition(targetData) then
 
-        term.setTextColor(colors.red)
+        buffer.setTextColor(colors.red)
 
-        local angle=getTargetAngle(self,targetData)
-
-        drawLine(angle)
+        drawLine(getTargetAngle(self,targetData))
 
     end
 
+
+    term.setCursorPos(1,1)
+    term.blit(
+        buffer.getLine(1),
+        buffer.getLine(2),
+        buffer.getLine(3)
+    )
 
 end
 
@@ -324,7 +374,8 @@ local function controlLoop()
 
     while true do
 
-        local event,key=os.pullEvent("key")
+        local _,key=os.pullEvent("key")
+
 
         if key==keys.x then
 
@@ -336,7 +387,7 @@ local function controlLoop()
 
         elseif key==keys.h then
 
-            showControls = not showControls
+            showControls=not showControls
 
         end
 
