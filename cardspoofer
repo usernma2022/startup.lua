@@ -1,8 +1,9 @@
 --to test my own security system and maybe spoof others
-local drive = peripheral.find("drive")
+local original = peripheral.wrap("left")
+local clone = peripheral.wrap("right")
 
-if not drive then
-    error("No drive")
+if not original or not clone then
+    error("Both drives required")
 end
 
 local function readDir(path)
@@ -45,21 +46,20 @@ local function writeDir(path,data)
     end
 end
 
-print("Insert ORIGINAL card")
-while not drive.isDiskPresent() do
+print("Insert ORIGINAL into LEFT")
+while not original.isDiskPresent() do
     sleep(0.1)
 end
 
-local source = drive.getMountPath()
-local data = readDir(source)
+print("Reading original...")
+local data = readDir(original.getMountPath())
 
-drive.ejectDisk()
-
-print("Insert CLONE card")
-while not drive.isDiskPresent() do
+print("Insert CLONE into RIGHT")
+while not clone.isDiskPresent() do
     sleep(0.1)
 end
 
-writeDir(drive.getMountPath(),data)
+print("Writing clone...")
+writeDir(clone.getMountPath(),data)
 
 print("Done!")
