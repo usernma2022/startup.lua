@@ -1,0 +1,65 @@
+--to test my own security system and maybe spoof others
+local drive = peripheral.find("drive")
+
+if not drive then
+    error("No drive")
+end
+
+local function readDir(path)
+    local data = {}
+
+    for _,name in ipairs(fs.list(path)) do
+        local full = fs.combine(path,name)
+
+        if fs.isDir(full) then
+            data[name] = {
+                dir = true,
+                files = readDir(full)
+            }
+        else
+            local f = fs.open(full,"rb")
+            data[name] = {
+                dir = false,
+                data = f.readAll()
+            }
+            f.close()
+        end
+    end
+
+    return data
+end
+
+local function writeDir(path,data)
+    fs.makeDir(path)
+
+    for name,item in pairs(data) do
+        local full = fs.combine(path,name)
+
+        if item.dir then
+            writeDir(full,item.files)
+        else
+            local f = fs.open(full,"wb")
+            f.write(item.data)
+            f.close()
+        end
+    end
+end
+
+print("Insert ORIGINAL card")
+while not drive.isDiskPresent() do
+    sleep(0.1)
+end
+
+local source = drive.getMountPath()
+local data = readDir(source)
+
+drive.ejectDisk()
+
+print("Insert CLONE card")
+while not drive.isDiskPresent() do
+    sleep(0.1)
+end
+
+writeDir(drive.getMountPath(),data)
+
+print("Done!")
