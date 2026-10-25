@@ -1,30 +1,173 @@
 
--- Peripheral Inspector v3.0
+-- Peripheral Inspector v4.0
 
 local function clear()
     term.clear()
     term.setCursorPos(1, 1)
 end
 
-local function pause()
+local function pause(message)
     print()
-    write("Press Enter to continue...")
+    write(message or "Press Enter to continue...")
     read()
 end
 
-local function printValue(value, depth)
-    depth = depth or 0
-
-    if type(value) == "table" then
-        local ok, result = pcall(textutils.serialize, value)
-        if ok then
-            print(result)
-        else
-            print("<Could not serialize table>")
+local function findMonitor()
+    for _, name in ipairs(peripheral.getNames()) do
+        if peripheral.getType(name) == "monitor" then
+            local ok, monitor = pcall(peripheral.wrap, name)
+            if ok and monitor then
+                return monitor, name
+            end
         end
-    else
-        print(tostring(value))
     end
+    return nil, nil
+end
+
+local function addLines(value, lines, indent, seen, key)
+    indent = indent or ""
+    seen = seen or {}
+
+    local prefix = key ~= nil and (tostring(key) .. " = ") or ""
+
+    if type(value) ~= "table" then
+        lines[#lines + 1] = indent .. prefix .. tostring(value)
+        return
+    end
+
+    if seen[value] then
+        lines[#lines + 1] = indent .. prefix .. "<circular reference>"
+        return
+    end
+
+    seen[value] = true
+
+    if next(value) == nil then
+        lines[#lines + 1] = indent .. prefix .. "{}"
+    else
+        if key ~= nil then
+            lines[#lines + 1] = indent .. prefix .. "{"
+            indent = indent .. "  "
+        end
+
+        for k, v in pairs(value) do
+            addLines(v, lines, indent, seen, k)
+        end
+
+        if key ~= nil then
+            lines[#lines + 1] = indent:sub(1, math.max(0, #indent - 2)) .. "}"
+        end
+    end
+
+    seen[value] = nil
+end
+
+local function wrapLine(line, width)
+    local result = {}
+
+    if width < 1 then
+        return {line}
+    end
+
+    while #line > width do
+        local cut = width
+        local space = line:sub(1, width):match(".*()%s")
+
+        if space and space > 1 then
+            cut = space
+        end
+
+        result[#result + 1] = line:sub(1, cut)
+        line = line:sub(cut + 1)
+    end
+
+    result[#result + 1] = line
+    return result
+end
+
+local function displayOnMonitor(title, lines)
+    local monitor, monitorName = findMonitor()
+
+    if not monitor then
+        print()
+        print("No monitor connected. Showing output here:")
+        print("--------------------------------")
+        for _, line in ipairs(lines) do
+            print(line)
+        end
+        return
+    end
+
+    local ok, err = pcall(function()
+        monitor.setTextScale(0.5)
+    end)
+
+    local width, height = monitor.getSize()
+    local displayLines = {}
+
+    for _, line in ipairs(lines) do
+        local wrapped = wrapLine(line, width)
+        for _, part in ipairs(wrapped) do
+            displayLines[#displayLines + 1] = part
+        end
+    end
+
+    if #displayLines == 0 then
+        displayLines[1] = "<No output>"
+    end
+
+    local pageSize = math.max(1, height - 2)
+    local page = 1
+    local totalPages = math.ceil(#displayLines / pageSize)
+
+    while page <= totalPages do
+        if not peripheral.isPresent(monitorName) then
+            print("Monitor disconnected.")
+            return
+        end
+
+        monitor.setBackgroundColor(colors.black)
+        monitor.setTextColor(colors.white)
+        monitor.clear()
+        monitor.setCursorPos(1, 1)
+
+        monitor.setTextColor(colors.cyan)
+        monitor.write(title:sub(1, width))
+        monitor.setTextColor(colors.white)
+
+        local first = (page - 1) * pageSize + 1
+        local last = math.min(first + pageSize - 1, #displayLines)
+
+        for i = first, last do
+            monitor.setCursorPos(1, i - first + 2)
+            monitor.write(displayLines[i])
+        end
+
+        monitor.setCursorPos(1, height)
+        monitor.setTextColor(colors.yellow)
+        monitor.write(("Page %d/%d"):format(page, totalPages))
+
+        if totalPages > 1 then
+            clear()
+            print(title)
+            print("Monitor: " .. monitorName)
+            print("Page " .. page .. " of " .. totalPages)
+            print("Enter = next page, q = stop")
+            write("> ")
+
+            local input = read():lower()
+            if input == "q" then
+                break
+            end
+        else
+            break
+        end
+
+        page = page + 1
+    end
+
+    monitor.setTextColor(colors.white)
+    monitor.setCursorPos(1, height)
 end
 
 local function getInput(prompt)
@@ -50,7 +193,7 @@ end
 local function chooseInputType()
     print()
     print("Input type:")
-    print("1) Auto (number, boolean, text, nil)")
+    print("1) Auto")
     print("2) Number")
     print("3) Text")
     print("4) Boolean")
@@ -64,39 +207,38 @@ local function chooseInputType()
             write("Number: ")
             local value = tonumber(read())
             if value ~= nil then
-                return value
+                return true, value
             end
-            print("Please enter a valid number.")
+            print("Enter a valid number.")
         end
     elseif choice == "3" then
         write("Text: ")
-        return read()
+        return true, read()
     elseif choice == "4" then
         while true do
             write("Boolean (true/false): ")
             local value = read():lower()
             if value == "true" then
-                return true
+                return true, true
             elseif value == "false" then
-                return false
+                return true, false
             end
             print("Enter true or false.")
         end
     elseif choice == "5" then
-        return nil
+        return true, nil
     else
-        return getInput("Value: ")
+        return true, getInput("Value: ")
     end
 end
 
-local function callMethod(p, method)
+local function callMethod(p, method, name)
     print()
     print("Method: " .. method)
-    print("Enter arguments in order.")
-    print("Use Finish to stop adding arguments.")
+    print("Add arguments in the order the method expects.")
     print()
 
-    local args = {}
+    local args = {n = 0}
 
     while true do
         write("Add argument? (y/n): ")
@@ -106,40 +248,49 @@ local function callMethod(p, method)
             break
         end
 
-        args[#args + 1] = chooseInputType()
-        print("Argument added.")
+        local present, value = chooseInputType()
+        args.n = args.n + 1
+        args[args.n] = value
+        print("Argument " .. args.n .. " added.")
     end
 
     print()
     print("Calling method...")
 
-    local ok, results = pcall(function()
-        return table.pack(p[method](table.unpack(args, 1, #args)))
-    end)
+    local results = table.pack(pcall(function()
+        return p[method](table.unpack(args, 1, args.n))
+    end))
 
-    print("--------------------------------")
+    local lines = {}
 
-    if not ok then
-        print("Call failed:")
-        print(tostring(results))
-        return
+    if not results[1] then
+        lines[#lines + 1] = "CALL FAILED"
+        lines[#lines + 1] = tostring(results[2])
+    else
+        lines[#lines + 1] = "Call succeeded."
+
+        if results.n == 1 then
+            lines[#lines + 1] = "No values returned."
+        else
+            for i = 2, results.n do
+                lines[#lines + 1] = "Return value " .. (i - 1) .. ":"
+                addLines(results[i], lines, "  ", {}, nil)
+            end
+        end
     end
 
-    print("Call succeeded.")
+    displayOnMonitor(name .. "." .. method, lines)
 
-    if results.n == 0 then
-        print("No values returned.")
-    else
-        for i = 1, results.n do
-            print("Return value " .. i .. ":")
-            printValue(results[i])
-        end
+    print()
+    print("Result:")
+    for _, line in ipairs(lines) do
+        print(line)
     end
 end
 
 while true do
     clear()
-    print("=== Peripheral Inspector v3.0 ===")
+    print("=== Peripheral Inspector v4.0 ===")
     print()
 
     local names = peripheral.getNames()
@@ -168,10 +319,11 @@ while true do
             pause()
         else
             local name = names[choice]
-            local p = peripheral.wrap(name)
 
-            while p do
+            while peripheral.isPresent(name) do
+                local p = peripheral.wrap(name)
                 clear()
+
                 print("Peripheral: " .. name)
                 print("Type: " .. tostring(peripheral.getType(name)))
                 print()
@@ -185,22 +337,18 @@ while true do
                 end
 
                 print()
-                print("Enter method number or exact method name.")
-                print("Type r to refresh, b to go back.")
+                print("Enter method number or exact name.")
+                print("r = refresh, b = back")
                 write("Method: ")
 
                 local input = read()
 
                 if input:lower() == "b" then
                     break
-                elseif input:lower() == "r" then
-                    -- Refresh the method list.
-                else
+                elseif input:lower() ~= "r" then
                     local method = tonumber(input)
                     if method then
                         method = methods[method]
-                    else
-                        method = input
                     end
 
                     local found = false
@@ -211,31 +359,15 @@ while true do
                         end
                     end
 
-                    if not found then
-                        print("Unknown method.")
+                    if found then
+                        clear()
+                        callMethod(p, method, name)
                         pause()
                     else
-                        clear()
-                        print("Peripheral: " .. name)
-
-                        callMethod(p, method)
+                        print("Unknown method.")
                         pause()
-
-                        if not peripheral.isPresent(name) then
-                            print("Peripheral disconnected.")
-                            pause()
-                            break
-                        end
                     end
                 end
-
-                if not peripheral.isPresent(name) then
-                    print("Peripheral disconnected.")
-                    pause()
-                    break
-                end
-
-                p = peripheral.wrap(name)
             end
         end
     end
