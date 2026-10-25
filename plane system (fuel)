@@ -1,4 +1,5 @@
 
+
 local INPUT_DOWN = "front"
 local INPUT_UP = "back"
 local OUTPUT = "bottom"
@@ -10,9 +11,11 @@ local MAX_THRUST = 15
 local ADJUST_DELAY = 0.2
 local FUEL_SAMPLE_INTERVAL = 5
 local LOW_FUEL_THRESHOLD = 4000
-local LOW_FUEL_SOUND = "minecraft:entity.warden.heartbeat"
+
 local ALERT_VOLUME = 3
-local ALERT_PITCH = 0.8
+local ALERT_PITCH_LOW = 0.7
+local ALERT_PITCH_HIGH = 1.5
+local ALERT_TONE_DELAY = 0.35
 
 local thrust = 0
 local lastAdjust = 0
@@ -22,7 +25,9 @@ local fuelRate = 0
 local previousAmount = nil
 local previousSampleTime = nil
 local tankError = nil
+local speakerError = nil
 local lowFuelAlertActive = false
+local alarmTone = false
 
 local function getPeripheral(side)
     if peripheral.isPresent(side) then
@@ -103,7 +108,7 @@ end
 
 local function readFuel()
     if not peripheral.isPresent(TANK) then
-        tankError = "No tank peripheral on right"
+        tankError = "No tank on right"
         return nil, nil
     end
 
@@ -170,40 +175,6 @@ local function readFuel()
     return nil, nil
 end
 
-local function playLowFuelAlert()
-    if not speaker then
-        speaker = getPeripheral(SPEAKER)
-    end
-
-    if speaker and type(speaker.playSound) == "function" then
-        local ok, err = pcall(
-            speaker.playSound,
-            LOW_FUEL_SOUND,
-            ALERT_VOLUME,
-            ALERT_PITCH
-        )
-
-        if not ok then
-            tankError = "Speaker error: " .. tostring(err)
-        end
-    end
-end
-
-local function checkLowFuel(amount)
-    if amount == nil then
-        return
-    end
-
-    if amount < LOW_FUEL_THRESHOLD then
-        if not lowFuelAlertActive then
-            lowFuelAlertActive = true
-            playLowFuelAlert()
-        end
-    else
-        lowFuelAlertActive = false
-    end
-end
-
 local function updateThrust()
     redstone.setAnalogOutput(OUTPUT, thrust)
 end
@@ -221,7 +192,11 @@ local function sampleFuel()
     fuelAmount = amount
     fuelCapacity = capacity
 
-    checkLowFuel(amount)
+    if amount < LOW_FUEL_THRESHOLD then
+        lowFuelAlertActive = true
+    else
+        lowFuelAlertActive = false
+    end
 
     if previousAmount ~= nil and previousSampleTime ~= nil then
         local elapsed = now - previousSampleTime
@@ -242,6 +217,49 @@ local function sampleFuel()
 
     previousAmount = amount
     previousSampleTime = now
+end
+
+local function playAlarmTone(pitch)
+    if not speaker then
+        speaker = getPeripheral(SPEAKER)
+    end
+
+    if not speaker then
+        speakerError = "No speaker on left"
+        return
+    end
+
+    local ok, err = pcall(
+        speaker.playSound,
+        "minecraft:block.note_block.pling",
+        ALERT_VOLUME,
+        pitch
+    )
+
+    if not ok then
+        speakerError = tostring(err)
+    else
+        speakerError = nil
+    end
+end
+
+local function alarmLoop()
+    while true do
+        if lowFuelAlertActive then
+            alarmTone = not alarmTone
+
+            if alarmTone then
+                playAlarmTone(ALERT_PITCH_HIGH)
+            else
+                playAlarmTone(ALERT_PITCH_LOW)
+            end
+
+            sleep(ALERT_TONE_DELAY)
+        else
+            alarmTone = false
+            sleep(0.1)
+        end
+    end
 end
 
 local function formatTime(seconds)
@@ -274,12 +292,10 @@ local function drawStatus()
     print("Thrust: " .. thrust .. "/" .. MAX_THRUST)
     print("Output: " .. OUTPUT)
     print("")
-
     print("CONTROLS")
     print("Front: Shift / decrease")
     print("Back:  Jump / increase")
     print("")
-
     print("FUEL MONITOR")
 
     if fuelAmount ~= nil then
@@ -300,9 +316,9 @@ local function drawStatus()
             print(string.format("Fuel: %.1f units", fuelAmount))
         end
 
-        if fuelAmount < LOW_FUEL_THRESHOLD then
+        if lowFuelAlertActive then
             term.setTextColor(colors.red)
-            print("WARNING: LOW FUEL!")
+            print("!!! LOW FUEL - ALARM ACTIVE !!!")
             term.setTextColor(colors.white)
         else
             print("Fuel warning: Armed")
@@ -324,11 +340,16 @@ local function drawStatus()
         print(tankError or "Check tank peripheral")
     end
 
+    if speakerError then
+        print("")
+        print("SPEAKER: " .. speakerError)
+    end
+
     print("")
     print("Ctrl+T to stop")
 end
 
-local function main()
+local function controlLoop()
     updateThrust()
     sampleFuel()
 
@@ -364,7 +385,9 @@ local function main()
     end
 end
 
-local ok, err = pcall(main)
+local ok, err = pcall(function()
+    parallel.waitForAny(controlLoop, alarmLoop)
+end)
 
 redstone.setAnalogOutput(OUTPUT, 0)
 
