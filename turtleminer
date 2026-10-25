@@ -1,16 +1,16 @@
 
--- AEGIS Diamond Scout v1.0
--- Requires a mining turtle and an Advanced Peripherals Geo Scanner.
--- Scans for diamond ore for 30 seconds, then reverses its recorded route.
+-- AEGIS Diamond Scout v1.1
+-- Requires CC:Tweaked and an Advanced Peripherals Geo Scanner.
+-- Searches for diamond ore for 30 seconds, then reverses its recorded route.
+-- No fuel check: configure CC:Tweaked for unlimited turtle fuel if needed.
 
 local RUN_TIME = 30
 local SCAN_RADIUS = 8
-local MIN_FUEL = 64
 local MAX_MOVE_RETRIES = 8
 
 local started = os.epoch("utc")
 local route = {}
-local mined = 0
+local targetsReached = 0
 local scans = 0
 
 local function log(message)
@@ -23,16 +23,17 @@ local function findScanner()
 
         if ok and p then
             local methods = peripheral.getMethods(name) or {}
-            local hasScan = false
 
-            for _, method in ipairs(methods) do
-                if method == "scanBlocks" or method == "scan" then
-                    hasScan = true
-                    break
-                end
-            end
-
-            if hasScan then
+            if
+                (function()
+                    for _, method in ipairs(methods) do
+                        if method == "scanBlocks" or method == "scan" then
+                            return true
+                        end
+                    end
+                    return false
+                end)()
+            then
                 return p, name
             end
         end
@@ -49,17 +50,18 @@ if not scanner then
     return
 end
 
+local function record(action)
+    route[#route + 1] = action
+end
+
 local function inventoryFull()
     for slot = 1, 16 do
         if turtle.getItemSpace(slot) > 0 then
             return false
         end
     end
-    return true
-end
 
-local function record(action)
-    route[#route + 1] = action
+    return true
 end
 
 local function turnLeft()
@@ -67,6 +69,7 @@ local function turnLeft()
         record("left")
         return true
     end
+
     return false
 end
 
@@ -75,6 +78,7 @@ local function turnRight()
         record("right")
         return true
     end
+
     return false
 end
 
@@ -94,11 +98,11 @@ local function moveForward()
                 log("Cannot dig the block ahead.")
                 return false
             end
-            sleep(0.2)
         else
             turtle.attack()
-            sleep(0.2)
         end
+
+        sleep(0.2)
     end
 
     log("Could not move forward.")
@@ -120,17 +124,14 @@ local function moveVertical(direction)
             return true
         end
 
-        local detected
         if direction == "up" then
-            detected = turtle.detectUp()
-            if detected then
+            if turtle.detectUp() then
                 turtle.digUp()
             else
                 turtle.attackUp()
             end
         else
-            detected = turtle.detectDown()
-            if detected then
+            if turtle.detectDown() then
                 turtle.digDown()
             else
                 turtle.attackDown()
@@ -158,14 +159,21 @@ local function moveAxis(axis, amount)
                 return false
             end
         end
+
         return true
     end
 
     if axis == "f" and direction < 0 then
-        if not turnAround() then return false end
-        for _ = 1, count do
-            if not moveForward() then return false end
+        if not turnAround() then
+            return false
         end
+
+        for _ = 1, count do
+            if not moveForward() then
+                return false
+            end
+        end
+
         return turnAround()
     end
 
@@ -177,7 +185,9 @@ local function moveAxis(axis, amount)
         end
 
         for _ = 1, count do
-            if not moveForward() then return false end
+            if not moveForward() then
+                return false
+            end
         end
 
         if direction > 0 then
@@ -197,9 +207,25 @@ local function moveAxis(axis, amount)
 end
 
 local function scanForDiamonds()
-    local scanMethod = scanner.scanBlocks or scanner.scan
+    local methodName
 
-    local ok, result, err = pcall(scanMethod, SCAN_RADIUS)
+    for _, method in ipairs(peripheral.getMethods(scannerName) or {}) do
+        if method == "scanBlocks" then
+            methodName = "scanBlocks"
+            break
+        elseif method == "scan" then
+            methodName = "scan"
+        end
+    end
+
+    if not methodName then
+        log("Scanner has no supported scan method.")
+        return nil
+    end
+
+    local ok, result, err = pcall(function()
+        return scanner[methodName](SCAN_RADIUS)
+    end)
 
     if not ok then
         log("Scanner error: " .. tostring(result))
@@ -207,7 +233,7 @@ local function scanForDiamonds()
     end
 
     if type(result) ~= "table" then
-        log("Scan unavailable: " .. tostring(err or result))
+        log("Invalid scan result: " .. tostring(err or result))
         return nil
     end
 
@@ -221,8 +247,6 @@ local function scanForDiamonds()
                 block.name == "minecraft:deepslate_diamond_ore"
 
             if isDiamond then
-                -- Modern Geo Scanner results use relative forward/right/up.
-                -- x/y/z are used as a fallback for older API versions.
                 local f = tonumber(block.f) or tonumber(block.x)
                 local r = tonumber(block.r) or tonumber(block.z)
                 local u = tonumber(block.u) or tonumber(block.y)
@@ -254,17 +278,16 @@ local function mineTarget(target)
     ))
 
     if inventoryFull() then
-        log("Inventory full. Returning home.")
+        log("Inventory full.")
         return false
     end
 
-    -- Travel through the target block so the turtle digs it.
     if not moveAxis("f", target.f) then return false end
     if not moveAxis("r", target.r) then return false end
     if not moveAxis("u", target.u) then return false end
 
-    mined = mined + 1
-    log("Reached target location. Rescanning.")
+    targetsReached = targetsReached + 1
+    log("Reached target location.")
     return true
 end
 
@@ -280,7 +303,6 @@ local function reverseRoute()
         elseif action == "right" then
             ok = turtle.turnLeft()
         elseif action == "forward" then
-            -- Usually the path is clear, but falling blocks may obstruct it.
             ok = turtle.back()
 
             if not ok then
@@ -311,11 +333,13 @@ local function reverseRoute()
                     ok = true
                     break
                 end
+
                 if turtle.detectDown() then
                     turtle.digDown()
                 else
                     turtle.attackDown()
                 end
+
                 sleep(0.2)
             end
         elseif action == "down" then
@@ -324,18 +348,19 @@ local function reverseRoute()
                     ok = true
                     break
                 end
+
                 if turtle.detectUp() then
                     turtle.digUp()
                 else
                     turtle.attackUp()
                 end
+
                 sleep(0.2)
             end
         end
 
         if not ok then
             log("RETURN FAILED at route step " .. i)
-            log("Stopped to avoid claiming the turtle returned home.")
             return false
         end
     end
@@ -349,18 +374,11 @@ local function remainingSeconds()
     return RUN_TIME - (os.epoch("utc") - started) / 1000
 end
 
-local fuel = turtle.getFuelLevel()
-
-if fuel ~= "unlimited" and fuel < MIN_FUEL then
-    print("Not enough fuel to safely start.")
-    print("Fuel: " .. tostring(fuel) .. " | Recommended minimum: " .. MIN_FUEL)
-    return
-end
-
-log("Diamond scout started.")
+log("AEGIS Diamond Scout started.")
 log("Scanner: " .. scannerName)
 log("Scan radius: " .. SCAN_RADIUS)
-log("Mining time: " .. RUN_TIME .. " seconds.")
+log("Mining window: " .. RUN_TIME .. " seconds.")
+log("Fuel check disabled.")
 
 local stopReason = "Time limit reached"
 
@@ -375,24 +393,24 @@ while remainingSeconds() > 0 do
     if not targets then
         sleep(1)
     elseif #targets == 0 then
-        log("No diamonds detected. Waiting before next scan.")
+        log("No diamonds detected.")
         sleep(1)
     else
         if not mineTarget(targets[1]) then
-            stopReason = "Could not reach target or inventory full"
+            stopReason = "Could not reach target"
             break
         end
     end
 end
 
 log("Stopping: " .. stopReason)
-log("Scans: " .. scans .. " | Targets reached: " .. mined)
+log("Scans: " .. scans .. " | Target locations reached: " .. targetsReached)
 
 local returned = reverseRoute()
 
 print()
 print("=== DIAMOND SCOUT REPORT ===")
 print("Scans: " .. scans)
-print("Target locations reached: " .. mined)
+print("Target locations reached: " .. targetsReached)
 print("Stop reason: " .. stopReason)
 print("Returned: " .. (returned and "Yes" or "NO - CHECK TURTLE"))
