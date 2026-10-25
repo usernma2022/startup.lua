@@ -1,0 +1,321 @@
+
+local INPUT_DOWN = "front"
+local INPUT_UP = "back"
+local OUTPUT = "bottom"
+local TANK = "right"
+
+local MIN_THRUST = 0
+local MAX_THRUST = 15
+local ADJUST_DELAY = 0.2
+local FUEL_SAMPLE_INTERVAL = 5
+
+local thrust = 0
+local lastAdjust = 0
+local lastSample = 0
+local lastAmount = nil
+local lastSampleTime = nil
+local fuelRate = 0
+local fuelAmount = nil
+local fuelCapacity = nil
+local tankError = nil
+
+local tankPresent = peripheral.isPresent(TANK)
+
+local function findPair(data, depth)
+    if type(data) ~= "table" or depth > 6 then
+        return nil, nil
+    end
+
+    local amountKeys = {
+        "amount", "amountintank", "stored",
+        "fluidamount", "currentamount", "quantity"
+    }
+
+    local capacityKeys = {
+        "capacity", "maxamount", "maxcapacity",
+        "tankcapacity", "maxstored"
+    }
+
+    local amount, capacity
+
+    for key, value in pairs(data) do
+        if type(key) == "string" then
+            local name = string.lower(key):gsub("[_%s%-]", "")
+
+            for _, candidate in ipairs(amountKeys) do
+                if name == candidate and type(value) == "number" then
+                    amount = value
+                end
+            end
+
+            for _, candidate in ipairs(capacityKeys) do
+                if name == candidate and type(value) == "number" then
+                    capacity = value
+                end
+            end
+        end
+    end
+
+    if amount ~= nil then
+        return amount, capacity
+    end
+
+    for _, value in pairs(data) do
+        if type(value) == "table" then
+            local nestedAmount, nestedCapacity = findPair(value, depth + 1)
+
+            if nestedAmount ~= nil then
+                return nestedAmount, nestedCapacity
+            end
+        end
+    end
+
+    return nil, nil
+end
+
+local function callTankMethod(method, index)
+    if not tankPresent then
+        return nil
+    end
+
+    local ok, result
+
+    if index == nil then
+        ok, result = pcall(peripheral.call, TANK, method)
+    else
+        ok, result = pcall(peripheral.call, TANK, method, index)
+    end
+
+    if ok then
+        return result
+    end
+
+    return nil
+end
+
+local function readFuel()
+    if not tankPresent then
+        tankError = "No peripheral on the right"
+        return nil, nil
+    end
+
+    local methods = {
+        "getInfo",
+        "getTankInfo",
+        "getTanks",
+        "tanks",
+        "getFluid",
+        "getFluidInTank",
+        "getContents",
+        "getFluidAmount",
+        "getAmount",
+        "getStored"
+    }
+
+    for _, method in ipairs(methods) do
+        local result = callTankMethod(method)
+
+        local amount, capacity = findPair(result, 0)
+
+        if amount == nil and type(result) == "number" then
+            amount = result
+        end
+
+        if amount == nil then
+            for index = 1, 4 do
+                result = callTankMethod(method, index)
+                amount, capacity = findPair(result, 0)
+
+                if amount == nil and type(result) == "number" then
+                    amount = result
+                end
+
+                if amount ~= nil then
+                    break
+                end
+            end
+        end
+
+        if amount ~= nil then
+            if capacity == nil then
+                local capacityMethods = {
+                    "getCapacity",
+                    "getTankCapacity",
+                    "getMaxAmount"
+                }
+
+                for _, capacityMethod in ipairs(capacityMethods) do
+                    local resultCapacity = callTankMethod(capacityMethod)
+
+                    if type(resultCapacity) == "number" then
+                        capacity = resultCapacity
+                        break
+                    end
+                end
+            end
+
+            tankError = nil
+            return amount, capacity
+        end
+    end
+
+    tankError = "Unsupported tank reading API"
+    return nil, nil
+end
+
+local function updateThrust()
+    redstone.setAnalogOutput(OUTPUT, thrust)
+end
+
+local function sampleFuel()
+    local now = os.clock()
+    local amount, capacity = readFuel()
+
+    if amount == nil then
+        fuelAmount = nil
+        fuelCapacity = nil
+        return
+    end
+
+    fuelAmount = amount
+    fuelCapacity = capacity
+
+    if lastAmount ~= nil and lastSampleTime ~= nil then
+        local elapsed = now - lastSampleTime
+        local consumed = lastAmount - amount
+
+        if elapsed > 0 and consumed > 0 then
+            local newRate = consumed / elapsed
+
+            if fuelRate == 0 then
+                fuelRate = newRate
+            else
+                fuelRate = fuelRate * 0.7 + newRate * 0.3
+            end
+        elseif consumed < 0 then
+            fuelRate = 0
+        end
+    end
+
+    lastAmount = amount
+    lastSampleTime = now
+end
+
+local function formatTime(seconds)
+    if seconds == nil or seconds < 0 then
+        return "Unknown"
+    end
+
+    local total = math.floor(seconds)
+    local hours = math.floor(total / 3600)
+    local minutes = math.floor((total % 3600) / 60)
+    local secs = total % 60
+
+    if hours > 0 then
+        return string.format("%dh %02dm", hours, minutes)
+    end
+
+    return string.format("%dm %02ds", minutes, secs)
+end
+
+local function drawStatus()
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+    term.clear()
+    term.setCursorPos(1, 1)
+
+    print("AEGIS FLIGHT COMPUTER")
+    print("---------------------")
+    print("Thrust: " .. thrust .. "/15")
+    print("Output: " .. OUTPUT)
+    print("")
+
+    print("CONTROLS")
+    print("Front: Shift / decrease")
+    print("Back:  Jump / increase")
+    print("")
+
+    print("FUEL MONITOR")
+
+    if fuelAmount ~= nil then
+        if fuelCapacity ~= nil then
+            print(string.format(
+                "Fuel: %.1f / %.1f",
+                fuelAmount, fuelCapacity
+            ))
+
+            if fuelCapacity > 0 then
+                print(string.format(
+                    "Tank: %.1f%%",
+                    fuelAmount / fuelCapacity * 100
+                ))
+            end
+        else
+            print(string.format("Fuel: %.1f units", fuelAmount))
+        end
+
+        if fuelRate > 0 then
+            print(string.format(
+                "Use: %.2f units/sec",
+                fuelRate
+            ))
+
+            print("Remaining: " .. formatTime(fuelAmount / fuelRate))
+        else
+            print("Use: measuring...")
+            print("Remaining: Unknown")
+        end
+    else
+        print("Fuel: unavailable")
+        print(tankError or "Check tank peripheral")
+    end
+
+    print("")
+    print("Ctrl+T to stop")
+end
+
+local function main()
+    updateThrust()
+    sampleFuel()
+
+    local nextSample = os.clock() + FUEL_SAMPLE_INTERVAL
+    local nextDisplay = 0
+
+    while true do
+        local now = os.clock()
+        local down = redstone.getInput(INPUT_DOWN)
+        local up = redstone.getInput(INPUT_UP)
+
+        if down and not up and now - lastAdjust >= ADJUST_DELAY then
+            thrust = math.max(MIN_THRUST, thrust - 1)
+            lastAdjust = now
+            updateThrust()
+        elseif up and not down and now - lastAdjust >= ADJUST_DELAY then
+            thrust = math.min(MAX_THRUST, thrust + 1)
+            lastAdjust = now
+            updateThrust()
+        end
+
+        if now >= nextSample then
+            sampleFuel()
+            nextSample = now + FUEL_SAMPLE_INTERVAL
+        end
+
+        if now >= nextDisplay then
+            drawStatus()
+            nextDisplay = now + 0.5
+        end
+
+        sleep(0.05)
+    end
+end
+
+local ok, err = pcall(main)
+
+redstone.setAnalogOutput(OUTPUT, 0)
+
+if not ok then
+    term.setTextColor(colors.red)
+    print("Flight computer error:")
+    print(tostring(err))
+end
