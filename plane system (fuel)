@@ -3,55 +3,68 @@ local INPUT_DOWN = "front"
 local INPUT_UP = "back"
 local OUTPUT = "bottom"
 local TANK = "right"
+local SPEAKER = "left"
 
 local MIN_THRUST = 0
 local MAX_THRUST = 15
 local ADJUST_DELAY = 0.2
 local FUEL_SAMPLE_INTERVAL = 5
+local LOW_FUEL_THRESHOLD = 4000
+local LOW_FUEL_SOUND = "minecraft:entity.warden.heartbeat"
+local ALERT_VOLUME = 3
+local ALERT_PITCH = 0.8
 
 local thrust = 0
 local lastAdjust = 0
-local lastSample = 0
-local lastAmount = nil
-local lastSampleTime = nil
-local fuelRate = 0
 local fuelAmount = nil
 local fuelCapacity = nil
+local fuelRate = 0
+local previousAmount = nil
+local previousSampleTime = nil
 local tankError = nil
+local lowFuelAlertActive = false
 
-local tankPresent = peripheral.isPresent(TANK)
+local function getPeripheral(side)
+    if peripheral.isPresent(side) then
+        return peripheral.wrap(side)
+    end
+    return nil
+end
 
-local function findPair(data, depth)
+local speaker = getPeripheral(SPEAKER)
+
+local function findFuelData(data, depth)
     if type(data) ~= "table" or depth > 6 then
         return nil, nil
     end
 
     local amountKeys = {
-        "amount", "amountintank", "stored",
-        "fluidamount", "currentamount", "quantity"
+        amount = true,
+        amountintank = true,
+        fluidamount = true,
+        currentamount = true,
+        quantity = true,
+        stored = true
     }
 
     local capacityKeys = {
-        "capacity", "maxamount", "maxcapacity",
-        "tankcapacity", "maxstored"
+        capacity = true,
+        maxamount = true,
+        maxcapacity = true,
+        tankcapacity = true,
+        maxstored = true
     }
 
     local amount, capacity
 
     for key, value in pairs(data) do
-        if type(key) == "string" then
-            local name = string.lower(key):gsub("[_%s%-]", "")
+        if type(key) == "string" and type(value) == "number" then
+            local normalized = string.lower(key):gsub("[_%s%-]", "")
 
-            for _, candidate in ipairs(amountKeys) do
-                if name == candidate and type(value) == "number" then
-                    amount = value
-                end
-            end
-
-            for _, candidate in ipairs(capacityKeys) do
-                if name == candidate and type(value) == "number" then
-                    capacity = value
-                end
+            if amountKeys[normalized] then
+                amount = value
+            elseif capacityKeys[normalized] then
+                capacity = value
             end
         end
     end
@@ -62,7 +75,8 @@ local function findPair(data, depth)
 
     for _, value in pairs(data) do
         if type(value) == "table" then
-            local nestedAmount, nestedCapacity = findPair(value, depth + 1)
+            local nestedAmount, nestedCapacity =
+                findFuelData(value, depth + 1)
 
             if nestedAmount ~= nil then
                 return nestedAmount, nestedCapacity
@@ -73,18 +87,12 @@ local function findPair(data, depth)
     return nil, nil
 end
 
-local function callTankMethod(method, index)
-    if not tankPresent then
+local function callTank(method, ...)
+    if not peripheral.isPresent(TANK) then
         return nil
     end
 
-    local ok, result
-
-    if index == nil then
-        ok, result = pcall(peripheral.call, TANK, method)
-    else
-        ok, result = pcall(peripheral.call, TANK, method, index)
-    end
+    local ok, result = pcall(peripheral.call, TANK, method, ...)
 
     if ok then
         return result
@@ -94,8 +102,8 @@ local function callTankMethod(method, index)
 end
 
 local function readFuel()
-    if not tankPresent then
-        tankError = "No peripheral on the right"
+    if not peripheral.isPresent(TANK) then
+        tankError = "No tank peripheral on right"
         return nil, nil
     end
 
@@ -113,9 +121,8 @@ local function readFuel()
     }
 
     for _, method in ipairs(methods) do
-        local result = callTankMethod(method)
-
-        local amount, capacity = findPair(result, 0)
+        local result = callTank(method)
+        local amount, capacity = findFuelData(result, 0)
 
         if amount == nil and type(result) == "number" then
             amount = result
@@ -123,8 +130,8 @@ local function readFuel()
 
         if amount == nil then
             for index = 1, 4 do
-                result = callTankMethod(method, index)
-                amount, capacity = findPair(result, 0)
+                result = callTank(method, index)
+                amount, capacity = findFuelData(result, 0)
 
                 if amount == nil and type(result) == "number" then
                     amount = result
@@ -145,10 +152,10 @@ local function readFuel()
                 }
 
                 for _, capacityMethod in ipairs(capacityMethods) do
-                    local resultCapacity = callTankMethod(capacityMethod)
+                    local value = callTank(capacityMethod)
 
-                    if type(resultCapacity) == "number" then
-                        capacity = resultCapacity
+                    if type(value) == "number" then
+                        capacity = value
                         break
                     end
                 end
@@ -161,6 +168,40 @@ local function readFuel()
 
     tankError = "Unsupported tank reading API"
     return nil, nil
+end
+
+local function playLowFuelAlert()
+    if not speaker then
+        speaker = getPeripheral(SPEAKER)
+    end
+
+    if speaker and type(speaker.playSound) == "function" then
+        local ok, err = pcall(
+            speaker.playSound,
+            LOW_FUEL_SOUND,
+            ALERT_VOLUME,
+            ALERT_PITCH
+        )
+
+        if not ok then
+            tankError = "Speaker error: " .. tostring(err)
+        end
+    end
+end
+
+local function checkLowFuel(amount)
+    if amount == nil then
+        return
+    end
+
+    if amount < LOW_FUEL_THRESHOLD then
+        if not lowFuelAlertActive then
+            lowFuelAlertActive = true
+            playLowFuelAlert()
+        end
+    else
+        lowFuelAlertActive = false
+    end
 end
 
 local function updateThrust()
@@ -180,25 +221,27 @@ local function sampleFuel()
     fuelAmount = amount
     fuelCapacity = capacity
 
-    if lastAmount ~= nil and lastSampleTime ~= nil then
-        local elapsed = now - lastSampleTime
-        local consumed = lastAmount - amount
+    checkLowFuel(amount)
+
+    if previousAmount ~= nil and previousSampleTime ~= nil then
+        local elapsed = now - previousSampleTime
+        local consumed = previousAmount - amount
 
         if elapsed > 0 and consumed > 0 then
-            local newRate = consumed / elapsed
+            local measuredRate = consumed / elapsed
 
-            if fuelRate == 0 then
-                fuelRate = newRate
+            if fuelRate <= 0 then
+                fuelRate = measuredRate
             else
-                fuelRate = fuelRate * 0.7 + newRate * 0.3
+                fuelRate = fuelRate * 0.7 + measuredRate * 0.3
             end
         elseif consumed < 0 then
             fuelRate = 0
         end
     end
 
-    lastAmount = amount
-    lastSampleTime = now
+    previousAmount = amount
+    previousSampleTime = now
 end
 
 local function formatTime(seconds)
@@ -213,9 +256,11 @@ local function formatTime(seconds)
 
     if hours > 0 then
         return string.format("%dh %02dm", hours, minutes)
+    elseif minutes > 0 then
+        return string.format("%dm %02ds", minutes, secs)
     end
 
-    return string.format("%dm %02ds", minutes, secs)
+    return string.format("%ds", secs)
 end
 
 local function drawStatus()
@@ -226,7 +271,7 @@ local function drawStatus()
 
     print("AEGIS FLIGHT COMPUTER")
     print("---------------------")
-    print("Thrust: " .. thrust .. "/15")
+    print("Thrust: " .. thrust .. "/" .. MAX_THRUST)
     print("Output: " .. OUTPUT)
     print("")
 
@@ -241,7 +286,8 @@ local function drawStatus()
         if fuelCapacity ~= nil then
             print(string.format(
                 "Fuel: %.1f / %.1f",
-                fuelAmount, fuelCapacity
+                fuelAmount,
+                fuelCapacity
             ))
 
             if fuelCapacity > 0 then
@@ -254,13 +300,21 @@ local function drawStatus()
             print(string.format("Fuel: %.1f units", fuelAmount))
         end
 
+        if fuelAmount < LOW_FUEL_THRESHOLD then
+            term.setTextColor(colors.red)
+            print("WARNING: LOW FUEL!")
+            term.setTextColor(colors.white)
+        else
+            print("Fuel warning: Armed")
+        end
+
         if fuelRate > 0 then
             print(string.format(
                 "Use: %.2f units/sec",
                 fuelRate
             ))
-
-            print("Remaining: " .. formatTime(fuelAmount / fuelRate))
+            print("Remaining: " ..
+                formatTime(fuelAmount / fuelRate))
         else
             print("Use: measuring...")
             print("Remaining: Unknown")
@@ -316,6 +370,6 @@ redstone.setAnalogOutput(OUTPUT, 0)
 
 if not ok then
     term.setTextColor(colors.red)
-    print("Flight computer error:")
+    print("Flight computer stopped:")
     print(tostring(err))
 end
