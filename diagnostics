@@ -1,5 +1,6 @@
 
--- Peripheral Inspector v4.0
+-- Peripheral Inspector v5.0
+-- Includes interactive dial / axis testing and monitor output.
 
 local function clear()
     term.clear()
@@ -90,7 +91,7 @@ local function displayOnMonitor(title, lines)
 
     if not monitor then
         print()
-        print("No monitor connected. Showing output here:")
+        print("No monitor connected. Output:")
         print("--------------------------------")
         for _, line in ipairs(lines) do
             print(line)
@@ -98,16 +99,13 @@ local function displayOnMonitor(title, lines)
         return
     end
 
-    local ok, err = pcall(function()
-        monitor.setTextScale(0.5)
-    end)
+    pcall(monitor.setTextScale, 0.5)
 
     local width, height = monitor.getSize()
     local displayLines = {}
 
     for _, line in ipairs(lines) do
-        local wrapped = wrapLine(line, width)
-        for _, part in ipairs(wrapped) do
+        for _, part in ipairs(wrapLine(tostring(line), width)) do
             displayLines[#displayLines + 1] = part
         end
     end
@@ -117,10 +115,9 @@ local function displayOnMonitor(title, lines)
     end
 
     local pageSize = math.max(1, height - 2)
-    local page = 1
     local totalPages = math.ceil(#displayLines / pageSize)
 
-    while page <= totalPages do
+    for page = 1, totalPages do
         if not peripheral.isPresent(monitorName) then
             print("Monitor disconnected.")
             return
@@ -130,7 +127,6 @@ local function displayOnMonitor(title, lines)
         monitor.setTextColor(colors.white)
         monitor.clear()
         monitor.setCursorPos(1, 1)
-
         monitor.setTextColor(colors.cyan)
         monitor.write(title:sub(1, width))
         monitor.setTextColor(colors.white)
@@ -147,7 +143,7 @@ local function displayOnMonitor(title, lines)
         monitor.setTextColor(colors.yellow)
         monitor.write(("Page %d/%d"):format(page, totalPages))
 
-        if totalPages > 1 then
+        if page < totalPages then
             clear()
             print(title)
             print("Monitor: " .. monitorName)
@@ -155,19 +151,49 @@ local function displayOnMonitor(title, lines)
             print("Enter = next page, q = stop")
             write("> ")
 
-            local input = read():lower()
-            if input == "q" then
+            if read():lower() == "q" then
                 break
             end
-        else
-            break
         end
-
-        page = page + 1
     end
 
     monitor.setTextColor(colors.white)
-    monitor.setCursorPos(1, height)
+end
+
+local function showResult(title, ok, result)
+    local lines = {}
+
+    if not ok then
+        lines[#lines + 1] = "CALL FAILED"
+        addLines(result, lines, "  ", {}, nil)
+    else
+        lines[#lines + 1] = "Call succeeded."
+
+        if result.n <= 1 then
+            lines[#lines + 1] = "No values returned."
+        else
+            for i = 2, result.n do
+                lines[#lines + 1] = "Return value " .. (i - 1) .. ":"
+                addLines(result[i], lines, "  ", {}, nil)
+            end
+        end
+    end
+
+    displayOnMonitor(title, lines)
+
+    print()
+    print("Result:")
+    for _, line in ipairs(lines) do
+        print(line)
+    end
+end
+
+local function invoke(p, method, ...)
+    local args = table.pack(...)
+
+    return table.pack(pcall(function()
+        return p[method](table.unpack(args, 1, args.n))
+    end))
 end
 
 local function getInput(prompt)
@@ -182,12 +208,7 @@ local function getInput(prompt)
         return false
     end
 
-    local number = tonumber(value)
-    if number ~= nil then
-        return number
-    end
-
-    return value
+    return tonumber(value) or value
 end
 
 local function chooseInputType()
@@ -198,8 +219,8 @@ local function chooseInputType()
     print("3) Text")
     print("4) Boolean")
     print("5) Nil")
-
     write("Type: ")
+
     local choice = read()
 
     if choice == "2" then
@@ -218,26 +239,21 @@ local function chooseInputType()
         while true do
             write("Boolean (true/false): ")
             local value = read():lower()
-            if value == "true" then
-                return true, true
-            elseif value == "false" then
-                return true, false
-            end
+            if value == "true" then return true, true end
+            if value == "false" then return true, false end
             print("Enter true or false.")
         end
     elseif choice == "5" then
         return true, nil
-    else
-        return true, getInput("Value: ")
     end
+
+    return true, getInput("Value: ")
 end
 
 local function callMethod(p, method, name)
     print()
     print("Method: " .. method)
     print("Add arguments in the order the method expects.")
-    print()
-
     local args = {n = 0}
 
     while true do
@@ -248,51 +264,211 @@ local function callMethod(p, method, name)
             break
         end
 
-        local present, value = chooseInputType()
+        local _, value = chooseInputType()
         args.n = args.n + 1
         args[args.n] = value
         print("Argument " .. args.n .. " added.")
     end
 
-    print()
     print("Calling method...")
+    local result = invoke(p, method, table.unpack(args, 1, args.n))
+    showResult(name .. "." .. method, result[1], result)
+end
 
-    local results = table.pack(pcall(function()
-        return p[method](table.unpack(args, 1, args.n))
-    end))
-
-    local lines = {}
-
-    if not results[1] then
-        lines[#lines + 1] = "CALL FAILED"
-        lines[#lines + 1] = tostring(results[2])
-    else
-        lines[#lines + 1] = "Call succeeded."
-
-        if results.n == 1 then
-            lines[#lines + 1] = "No values returned."
-        else
-            for i = 2, results.n do
-                lines[#lines + 1] = "Return value " .. (i - 1) .. ":"
-                addLines(results[i], lines, "  ", {}, nil)
-            end
+local function hasMethod(methods, target)
+    for _, method in ipairs(methods) do
+        if method == target then
+            return true
         end
     end
+    return false
+end
 
-    displayOnMonitor(name .. "." .. method, lines)
+local function readNumber(prompt, default)
+    while true do
+        write(prompt)
+        local input = read()
 
+        if input == "" and default ~= nil then
+            return default
+        end
+
+        local value = tonumber(input)
+        if value ~= nil then
+            return value
+        end
+
+        print("Enter a valid number.")
+    end
+end
+
+local function dialTester(p, name, methods)
+    if not hasMethod(methods, "setAngle") then
+        print("This peripheral does not expose setAngle().")
+        pause()
+        return
+    end
+
+    local hasGetAngle = hasMethod(methods, "getAngle")
+    local hasStopAuto = hasMethod(methods, "stopAuto")
+
+    clear()
+    print("=== Dial / Axis Tester ===")
+    print("Peripheral: " .. name)
     print()
-    print("Result:")
-    for _, line in ipairs(lines) do
-        print(line)
+    print("Select setAngle() argument format:")
+    print("1) setAngle(angle)")
+    print("2) setAngle(yaw, pitch)")
+    print("3) setAngle(pitch, yaw)")
+    print()
+    print("Choose the format that matches the peripheral API.")
+    print("If unsure, inspect its documentation first.")
+    write("Format: ")
+
+    local format = read()
+
+    if format ~= "1" and format ~= "2" and format ~= "3" then
+        print("Invalid format.")
+        pause()
+        return
+    end
+
+    local yaw = 0
+    local pitch = 0
+    local singleAngle = 0
+    local activeAxis = "yaw"
+    local step = 1
+
+    if format == "2" or format == "3" then
+        yaw = readNumber("Initial yaw value [0]: ", 0)
+        pitch = readNumber("Initial pitch value [0]: ", 0)
+    else
+        singleAngle = readNumber("Initial angle value [0]: ", 0)
+        print()
+        print("For one-argument mode, axis labels are only for your notes.")
+        print("The controller decides which axis setAngle(angle) affects.")
+    end
+
+    local function setCurrentAngle()
+        local result
+
+        if format == "1" then
+            result = invoke(p, "setAngle", singleAngle)
+        elseif format == "2" then
+            result = invoke(p, "setAngle", yaw, pitch)
+        else
+            result = invoke(p, "setAngle", pitch, yaw)
+        end
+
+        showResult(name .. ".setAngle", result[1], result)
+    end
+
+    local function readCurrentAngle()
+        if not hasGetAngle then
+            print("getAngle() is not available.")
+            displayOnMonitor("Dial / Axis Tester", {
+                "getAngle() is not available.",
+                "Peripheral: " .. name
+            })
+            return
+        end
+
+        local result = invoke(p, "getAngle")
+        showResult(name .. ".getAngle", result[1], result)
+    end
+
+    while peripheral.isPresent(name) do
+        clear()
+        print("=== Dial / Axis Tester ===")
+        print("Peripheral: " .. name)
+        print("Format: " .. format)
+
+        if format == "1" then
+            print("Selected label: " .. activeAxis)
+            print("Angle value: " .. singleAngle)
+        else
+            print("Yaw: " .. yaw)
+            print("Pitch: " .. pitch)
+        end
+
+        print("Step: " .. step)
+        print()
+        print("1) Select yaw")
+        print("2) Select pitch")
+        print("3) Increase selected angle")
+        print("4) Decrease selected angle")
+        print("5) Change step size")
+        print("6) Enter selected angle")
+        print("7) Send current angle(s) to setAngle()")
+        print("8) Read getAngle()")
+        if hasStopAuto then
+            print("9) Call stopAuto()")
+        end
+        print("b) Back")
+        print()
+        write("Choice: ")
+
+        local choice = read():lower()
+
+        if choice == "b" then
+            break
+        elseif choice == "1" then
+            activeAxis = "yaw"
+        elseif choice == "2" then
+            activeAxis = "pitch"
+        elseif choice == "3" or choice == "4" or choice == "6" then
+            local change = choice == "3" and step or choice == "4" and -step or nil
+
+            if format == "1" then
+                if choice == "6" then
+                    singleAngle = readNumber("New angle: ", singleAngle)
+                else
+                    singleAngle = singleAngle + change
+                end
+            elseif activeAxis == "yaw" then
+                if choice == "6" then
+                    yaw = readNumber("New yaw: ", yaw)
+                else
+                    yaw = yaw + change
+                end
+            else
+                if choice == "6" then
+                    pitch = readNumber("New pitch: ", pitch)
+                else
+                    pitch = pitch + change
+                end
+            end
+
+            print("Updated locally. Use option 7 to send it.")
+            pause()
+        elseif choice == "5" then
+            step = readNumber("New step size: ", step)
+            if step <= 0 then
+                step = 1
+                print("Step must be positive; reset to 1.")
+                pause()
+            end
+        elseif choice == "7" then
+            setCurrentAngle()
+            pause()
+        elseif choice == "8" then
+            readCurrentAngle()
+            pause()
+        elseif choice == "9" and hasStopAuto then
+            local result = invoke(p, "stopAuto")
+            showResult(name .. ".stopAuto", result[1], result)
+            pause()
+        else
+            print("Unknown option.")
+            pause()
+        end
     end
 end
 
 while true do
     clear()
-    print("=== Peripheral Inspector v4.0 ===")
+    print("=== Peripheral Inspector v5.0 ===")
     print()
-
     local names = peripheral.getNames()
 
     if #names == 0 then
@@ -322,15 +498,14 @@ while true do
 
             while peripheral.isPresent(name) do
                 local p = peripheral.wrap(name)
-                clear()
+                local methods = peripheral.getMethods(name) or {}
+                table.sort(methods)
 
+                clear()
                 print("Peripheral: " .. name)
                 print("Type: " .. tostring(peripheral.getType(name)))
                 print()
                 print("Methods:")
-
-                local methods = peripheral.getMethods(name) or {}
-                table.sort(methods)
 
                 for i, method in ipairs(methods) do
                     print(i .. ") " .. method)
@@ -338,28 +513,24 @@ while true do
 
                 print()
                 print("Enter method number or exact name.")
+                print("d = Dial / Axis Tester")
                 print("r = refresh, b = back")
                 write("Method: ")
 
                 local input = read()
+                local lower = input:lower()
 
-                if input:lower() == "b" then
+                if lower == "b" then
                     break
-                elseif input:lower() ~= "r" then
+                elseif lower == "d" then
+                    dialTester(p, name, methods)
+                elseif lower ~= "r" then
                     local method = tonumber(input)
                     if method then
                         method = methods[method]
                     end
 
-                    local found = false
-                    for _, candidate in ipairs(methods) do
-                        if candidate == method then
-                            found = true
-                            break
-                        end
-                    end
-
-                    if found then
+                    if method and hasMethod(methods, method) then
                         clear()
                         callMethod(p, method, name)
                         pause()
