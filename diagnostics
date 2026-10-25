@@ -1,76 +1,245 @@
---------------------------------------------------
--- Peripheral Inspector v2.0
---------------------------------------------------
 
-term.clear()
-term.setCursorPos(1,1)
+-- Peripheral Inspector v3.0
 
-print("=== Peripheral Inspector ===")
-print()
-
-local names = peripheral.getNames()
-
-for i,name in ipairs(names) do
-    print(i..") "..name.." ("..(peripheral.getType(name) or "?")..")")
+local function clear()
+    term.clear()
+    term.setCursorPos(1, 1)
 end
 
-print()
-write("Select peripheral number: ")
-
-local choice = tonumber(read())
-
-if not choice or not names[choice] then
-    print("Invalid selection.")
-    return
+local function pause()
+    print()
+    write("Press Enter to continue...")
+    read()
 end
 
-local name = names[choice]
-local p = peripheral.wrap(name)
+local function printValue(value, depth)
+    depth = depth or 0
 
-term.clear()
-term.setCursorPos(1,1)
-
-print("Inspecting: "..name)
-print("Type: "..peripheral.getType(name))
-print()
-
-local methods = peripheral.getMethods(name)
-table.sort(methods)
-
-for i,m in ipairs(methods) do
-    print(i..") "..m)
-end
-
-print()
-write("Method to call (blank = quit): ")
-
-local method = read()
-
-if method == "" then
-    return
-end
-
-if not p[method] then
-    print("Method doesn't exist.")
-    return
-end
-
-print()
-print("Calling "..method.."...")
-
-local ok, result = pcall(function()
-    return p[method]()
-end)
-
-print("--------------------------------")
-
-if ok then
-    if type(result) == "table" then
-        print(textutils.serialize(result))
+    if type(value) == "table" then
+        local ok, result = pcall(textutils.serialize, value)
+        if ok then
+            print(result)
+        else
+            print("<Could not serialize table>")
+        end
     else
-        print(tostring(result))
+        print(tostring(value))
     end
-else
-    print("Error:")
-    print(result)
 end
+
+local function getInput(prompt)
+    write(prompt)
+    local value = read()
+
+    if value == "nil" then
+        return nil
+    elseif value == "true" then
+        return true
+    elseif value == "false" then
+        return false
+    end
+
+    local number = tonumber(value)
+    if number ~= nil then
+        return number
+    end
+
+    return value
+end
+
+local function chooseInputType()
+    print()
+    print("Input type:")
+    print("1) Auto (number, boolean, text, nil)")
+    print("2) Number")
+    print("3) Text")
+    print("4) Boolean")
+    print("5) Nil")
+
+    write("Type: ")
+    local choice = read()
+
+    if choice == "2" then
+        while true do
+            write("Number: ")
+            local value = tonumber(read())
+            if value ~= nil then
+                return value
+            end
+            print("Please enter a valid number.")
+        end
+    elseif choice == "3" then
+        write("Text: ")
+        return read()
+    elseif choice == "4" then
+        while true do
+            write("Boolean (true/false): ")
+            local value = read():lower()
+            if value == "true" then
+                return true
+            elseif value == "false" then
+                return false
+            end
+            print("Enter true or false.")
+        end
+    elseif choice == "5" then
+        return nil
+    else
+        return getInput("Value: ")
+    end
+end
+
+local function callMethod(p, method)
+    print()
+    print("Method: " .. method)
+    print("Enter arguments in order.")
+    print("Use Finish to stop adding arguments.")
+    print()
+
+    local args = {}
+
+    while true do
+        write("Add argument? (y/n): ")
+        local answer = read():lower()
+
+        if answer ~= "y" and answer ~= "yes" then
+            break
+        end
+
+        args[#args + 1] = chooseInputType()
+        print("Argument added.")
+    end
+
+    print()
+    print("Calling method...")
+
+    local ok, results = pcall(function()
+        return table.pack(p[method](table.unpack(args, 1, #args)))
+    end)
+
+    print("--------------------------------")
+
+    if not ok then
+        print("Call failed:")
+        print(tostring(results))
+        return
+    end
+
+    print("Call succeeded.")
+
+    if results.n == 0 then
+        print("No values returned.")
+    else
+        for i = 1, results.n do
+            print("Return value " .. i .. ":")
+            printValue(results[i])
+        end
+    end
+end
+
+while true do
+    clear()
+    print("=== Peripheral Inspector v3.0 ===")
+    print()
+
+    local names = peripheral.getNames()
+
+    if #names == 0 then
+        print("No peripherals found.")
+        pause()
+    else
+        for i, name in ipairs(names) do
+            print(i .. ") " .. name .. " (" ..
+                tostring(peripheral.getType(name) or "?") .. ")")
+        end
+
+        print()
+        write("Select peripheral number (q = quit): ")
+        local choice = read()
+
+        if choice:lower() == "q" then
+            break
+        end
+
+        choice = tonumber(choice)
+
+        if not choice or not names[choice] then
+            print("Invalid selection.")
+            pause()
+        else
+            local name = names[choice]
+            local p = peripheral.wrap(name)
+
+            while p do
+                clear()
+                print("Peripheral: " .. name)
+                print("Type: " .. tostring(peripheral.getType(name)))
+                print()
+                print("Methods:")
+
+                local methods = peripheral.getMethods(name) or {}
+                table.sort(methods)
+
+                for i, method in ipairs(methods) do
+                    print(i .. ") " .. method)
+                end
+
+                print()
+                print("Enter method number or exact method name.")
+                print("Type r to refresh, b to go back.")
+                write("Method: ")
+
+                local input = read()
+
+                if input:lower() == "b" then
+                    break
+                elseif input:lower() == "r" then
+                    -- Refresh the method list.
+                else
+                    local method = tonumber(input)
+                    if method then
+                        method = methods[method]
+                    else
+                        method = input
+                    end
+
+                    local found = false
+                    for _, candidate in ipairs(methods) do
+                        if candidate == method then
+                            found = true
+                            break
+                        end
+                    end
+
+                    if not found then
+                        print("Unknown method.")
+                        pause()
+                    else
+                        clear()
+                        print("Peripheral: " .. name)
+
+                        callMethod(p, method)
+                        pause()
+
+                        if not peripheral.isPresent(name) then
+                            print("Peripheral disconnected.")
+                            pause()
+                            break
+                        end
+                    end
+                end
+
+                if not peripheral.isPresent(name) then
+                    print("Peripheral disconnected.")
+                    pause()
+                    break
+                end
+
+                p = peripheral.wrap(name)
+            end
+        end
+    end
+end
+
+clear()
+print("Peripheral Inspector closed.")
